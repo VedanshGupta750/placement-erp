@@ -1,0 +1,2584 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// Enums — platform / billing
+// ============================================================
+
+enum CollegeStatus {
+  LEAD
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  ARCHIVED
+}
+
+enum PlanCode {
+  STARTER
+  GROWTH
+  SCALE
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+// ============================================================
+// Enums — identity
+// ============================================================
+
+enum UserType {
+  STUDENT
+  FACULTY
+  MANAGEMENT
+  PLACEMENT_TEAM
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum InviteStatus {
+  PENDING
+  INVITED
+  ADDED_NOT_INVITED
+  ACCEPTED
+  REJECTED
+}
+
+enum AggregateType {
+  CGPA
+  PERCENTAGE
+}
+
+// ============================================================
+// Enums — placements (full state machines, per Placement OS freeze pack)
+// ============================================================
+
+enum DriveStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PUBLISHED
+  REGISTRATION_OPEN
+  REGISTRATION_CLOSED
+  SELECTION_ONGOING
+  COMPLETED
+  ARCHIVED
+  SUSPENDED
+  CANCELLED
+  REJECTED
+}
+
+enum PositionType {
+  JOB
+  INTERNSHIP
+  JOB_AND_INTERNSHIP
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  INTERNSHIP
+  INTERNSHIP_PLUS_PPO
+}
+
+enum LocationCategory {
+  ON_CAMPUS
+  OFF_CAMPUS
+  POOL_CAMPUS
+  VIRTUAL
+}
+
+enum SourceType {
+  SELF
+  INBOUND
+}
+
+enum ApplicationStatus {
+  REGISTERED
+  APPLIED
+  COLLEGE_APPROVED
+  SCREENING
+  SHORTLISTED
+  ROUND_IN_PROGRESS
+  SELECTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum RoundStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RoundCandidateStatus {
+  ASSIGNED
+  SCHEDULED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED // interview took place, awaiting evaluation — distinct from IN_PROGRESS
+  PASSED
+  FAILED
+  NO_SHOW
+  CANCELLED
+  WITHDRAWN
+}
+
+enum InterviewMode {
+  ONLINE
+  OFFLINE
+}
+
+enum OfferStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  DECLINED
+  JOINING_PENDING
+  JOINED
+  DID_NOT_JOIN
+  WITHDRAWN
+}
+
+enum OfferType {
+  JOB
+  INTERNSHIP
+  PPO
+}
+
+// PENDING/ACTIVE/BLOCKED existed before; PARTNER and DORMANT added for the
+// Company 360 rebuild's 5-state status model (Prospect=PENDING,
+// Active=ACTIVE, Partner=PARTNER, Dormant=DORMANT, Blacklisted=BLOCKED).
+enum PartnershipStatus {
+  PENDING
+  ACTIVE
+  PARTNER
+  DORMANT
+  BLOCKED
+}
+
+enum EventCategory {
+  EXPERT_SESSION
+  WORKSHOP
+  COMPETITION
+  HACKATHON
+  WEBINAR
+  CAREER_FAIR
+  PRE_PLACEMENT_TALK
+  ASSESSMENT
+  TRAINING
+  ALUMNI_SESSION
+  COMPANY_SESSION
+  GENERAL
+}
+
+enum EventMode {
+  ONLINE
+  OFFLINE
+  HYBRID
+}
+
+enum EventRegistrationStatus {
+  PENDING
+  CONFIRMED
+  WAITLISTED
+  REJECTED
+  CANCELLED
+}
+
+enum EventAttendanceMethod {
+  QR
+  MANUAL
+  IMPORT
+}
+
+enum EventFileCategory {
+  BROCHURE
+  AGENDA
+  SPEAKER_PPT
+  ATTENDANCE_SHEET
+  CERTIFICATE_TEMPLATE
+  RECORDING
+  PHOTO
+  FEEDBACK_REPORT
+  OTHER
+}
+
+enum NotificationChannel {
+  IN_APP
+  WEB_PUSH
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum PushDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  SKIPPED
+  FAILED
+}
+
+enum ImportStatus {
+  UPLOADED
+  MAPPING
+  VALIDATING
+  READY
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+enum ImportType {
+  STUDENTS
+  ACADEMIC_RECORDS
+  COURSES
+  COMPANIES
+  HISTORICAL_DRIVES
+  HISTORICAL_OFFERS
+  CONTACTS
+}
+
+enum FileVisibility {
+  PRIVATE
+  TENANT
+  PUBLIC
+}
+
+enum EligibilityDecision {
+  ELIGIBLE
+  NOT_ELIGIBLE
+}
+
+// ============================================================
+// Platform (SaaS operator — outside every college tenant)
+// ============================================================
+
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  @@map("platform_admins")
+}
+
+model Plan {
+  id            String   @id @default(cuid())
+  code          PlanCode @unique
+  name          String
+  maxStudents   Int
+  maxRecruiters Int
+  priceInPaise  Int
+  features      String[]
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// ============================================================
+// College (tenant root)
+// ============================================================
+
+model College {
+  id         String        @id @default(cuid())
+  name       String
+  slug       String        @unique
+  status     CollegeStatus @default(TRIAL)
+  university String?
+  website    String?
+  email      String?
+  phone      String?
+  logoUrl    String?
+  address    String?
+  city       String?
+  state      String?
+  postalCode String?
+  timezone   String        @default("Asia/Kolkata")
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  subscription          Subscription?
+  campuses              Campus[]
+  departments           Department[]
+  batches               Batch[]
+  courses               Course[]
+  skills                Skill[]
+  users                 User[]
+  companies             CollegePartnership[]
+  drives                Drive[]
+  contacts              Contact[]
+  events                Event[]
+  eventSpeakers         EventSpeaker[]
+  companyDocuments      CompanyDocument[]
+  studentSavedViews     StudentSavedView[]
+  driveSavedViews       DriveSavedView[]
+  applicationSavedViews ApplicationSavedView[]
+  scorecardTemplates    ScorecardTemplate[]
+  conversations         Conversation[]
+  forums                Forum[]
+  notifications         Notification[]
+  pushSubscriptions     PushSubscription[]
+  pushDeliveries        PushDelivery[]
+  inviteRequests        InviteRequest[]
+  roles                 Role[]
+  auditLogs             AuditLog[]
+  externalJobReviews    ExternalJobReview[]
+  studentSkillProfiles  StudentSkillProfile[]
+  imports               Import[]
+  files                 File[]
+  messageTemplates      MessageTemplate[]
+  broadcasts            Broadcast[]
+  placementCategories   PlacementCategory[]
+  placementExpenses     PlacementExpense[]
+  placementRevenues     PlacementRevenue[]
+  budgets               Budget[]
+
+  @@map("colleges")
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  collegeId        String             @unique
+  college          College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  planId           String
+  plan             Plan               @relation(fields: [planId], references: [id])
+  status           SubscriptionStatus @default(TRIALING)
+  currentPeriodEnd DateTime?
+  createdAt        DateTime           @default(now())
+
+  @@map("subscriptions")
+}
+
+// A college that only runs one campus still gets exactly one Campus row
+// (created at provisioning) — this keeps every downstream query uniformly
+// scoped by campusId instead of branching on "does this college have
+// campuses or not."
+model Campus {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  address   String?
+  timezone  String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  departments Department[]
+  batches     Batch[]
+  students    Student[]
+
+  @@unique([collegeId, code])
+  @@index([collegeId])
+  @@map("campuses")
+}
+
+// ============================================================
+// Departments, Batches, Courses
+// ============================================================
+
+model Department {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  campusId  String?
+  campus    Campus?  @relation(fields: [campusId], references: [id])
+  name      String
+  code      String?
+  email     String?
+  phone     String?
+  website   String?
+  createdAt DateTime @default(now())
+
+  courses     DepartmentCourse[]
+  memberships DepartmentMembership[]
+  drives      Drive[]
+  students    Student[]
+
+  @@index([collegeId])
+  @@map("departments")
+}
+
+// A department's active course list — "36/36 selected" in Basic Details.
+model DepartmentCourse {
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  courseId     String
+  course       Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([departmentId, courseId])
+  @@map("department_courses")
+}
+
+// Per-department, per-person: designation + role + admin flag — the "Team
+// Members" list (Head/Coordinator/Lead Coordinator/Volunteer).
+model DepartmentMembership {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  designation  String
+  title        String // Head / Coordinator / Lead Coordinator / Volunteer
+  isAdmin      Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  @@unique([departmentId, userId])
+  @@map("department_memberships")
+}
+
+// Course-completion year, e.g. "Batch 2026" — also the placement season
+// unit (a college running multiple named seasons per batch is out of scope
+// for v1; this is the pragmatic single-season-per-batch simplification).
+model Batch {
+  id                                String   @id @default(cuid())
+  collegeId                         String
+  college                           College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  campusId                          String?
+  campus                            Campus?  @relation(fields: [campusId], references: [id])
+  year                              Int
+  registrationEnabled               Boolean  @default(true)
+  loginAllowed                      Boolean  @default(true)
+  allowDiploma                      Boolean  @default(true)
+  requireApprovalForAcademicsUpdate Boolean  @default(false)
+  autoApprovalOnRegistration        Boolean  @default(true)
+  createdAt                         DateTime @default(now())
+
+  students Student[]
+  drives   Drive[]
+
+  @@unique([collegeId, year])
+  @@map("batches")
+}
+
+// Master course catalogue — degree x specialization.
+model Course {
+  id             String   @id @default(cuid())
+  collegeId      String
+  college        College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name           String
+  degree         String // B.Tech. / M.Tech. / MCA / M.B.A. / ...
+  specialization String?
+  courseType     String?
+  years          Int      @default(4)
+  createdAt      DateTime @default(now())
+
+  departments      DepartmentCourse[]
+  students         Student[]
+  driveEligibility DriveCourse[]
+
+  @@unique([collegeId, name])
+  @@index([collegeId])
+  @@map("courses")
+}
+
+// Tag catalogue behind "Required Skill(s)" chips and the Popular Tags widget.
+model Skill {
+  id        String  @id @default(cuid())
+  collegeId String
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name      String
+
+  students StudentSkill[]
+  drives   DriveSkill[]
+
+  @@unique([collegeId, name])
+  @@map("skills")
+}
+
+// ============================================================
+// RBAC — action + resource permission keys, composed into per-college Roles.
+// ============================================================
+
+model Permission {
+  id          String @id @default(cuid())
+  key         String @unique // e.g. "drive.publish", "student.view", "eligibility.override"
+  resource    String
+  action      String
+  description String
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name      String // Head / Coordinator / Lead Coordinator / Volunteer / Student / Faculty / Management
+  isSystem  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  rolePermissions RolePermission[]
+  users           User[]
+
+  @@unique([collegeId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================================
+// User — every human account inside a college tenant
+// ============================================================
+
+model User {
+  id            String     @id @default(cuid())
+  collegeId     String
+  college       College    @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  email         String     @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  avatarUrl     String?
+  coverImageUrl String?
+  linkedinUrl   String?
+  userType      UserType
+  status        UserStatus @default(INVITED)
+  mfaEnabled    Boolean    @default(false)
+  lastLoginAt   DateTime?
+  roleId        String?
+  role          Role?      @relation(fields: [roleId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  studentProfile             Student?
+  departmentMemberships      DepartmentMembership[]
+  notifications              Notification[]
+  notificationPreferences    NotificationPreference[]
+  pushSubscriptions          PushSubscription[]
+  auditLogs                  AuditLog[]
+  reviewedExternalJobs       ExternalJobReview[]
+  eventsCreated              Event[]                   @relation("EventCreator")
+  eventSpeakersCreated       EventSpeaker[]
+  eventRegistrations         EventRegistration[]
+  eventAttendances           EventAttendance[]
+  eventFeedback              EventFeedback[]
+  eventFilesUploaded         EventFile[]
+  eventCertificates          EventCertificate[]
+  studentDocumentsUploaded   StudentDocument[]         @relation("StudentDocumentUploadedBy")
+  studentNotes               StudentNote[]
+  studentSavedViews          StudentSavedView[]
+  driveSavedViews            DriveSavedView[]
+  drivesOwned                Drive[]                   @relation("DriveOwner")
+  applicationsOwned          Application[]             @relation("ApplicationOwner")
+  interviewerAssignments     RoundCandidate[]          @relation("InterviewerAssignments")
+  applicationNotes           ApplicationNote[]
+  applicationSavedViews      ApplicationSavedView[]
+  assignedStudents           Student[]                 @relation("StudentAssignedCoordinator")
+  conversationsCreated       Conversation[]            @relation("ConversationCreator")
+  conversationParticipations ConversationParticipant[]
+  messagesSent               Message[]                 @relation("MessageSender")
+  forumsCreated              Forum[]                   @relation("ForumCreator")
+  forumPosts                 ForumPost[]
+  forumReplies               ForumReply[]
+  driveHistoryEntries        DriveHistoryEntry[]
+  driveNotes                 DriveNote[]
+  contactsAdded              Contact[]                 @relation("ContactAddedBy")
+  contactsOwned              Contact[]                 @relation("ContactOwner")
+  contactCommunications      ContactCommunication[]
+  contactNotes               ContactNote[]
+  contactDocumentsUploaded   ContactDocument[]         @relation("ContactDocumentUploadedBy")
+  contactHistoryEntries      ContactHistoryEntry[]     @relation("ContactHistoryActor")
+  messageDrafts              MessageDraft[]            @relation("MessageDraftAuthor")
+  companyNotes               CompanyNote[]
+  companyDocumentsUploaded   CompanyDocument[]
+  filesUploaded              File[]                    @relation("FileUploadedBy")
+  importsStarted             Import[]                  @relation("ImportStartedBy")
+  broadcastReceipts          BroadcastRecipient[]
+  placementExpensesRecorded  PlacementExpense[]        @relation("PlacementExpenseRecordedBy")
+  placementRevenuesRecorded  PlacementRevenue[]        @relation("PlacementRevenueRecordedBy")
+  budgetsCreated             Budget[]                  @relation("BudgetCreatedBy")
+
+  @@index([collegeId])
+  @@map("users")
+}
+
+// ============================================================
+// Student — profile extension of a STUDENT-typed User
+// ============================================================
+
+model Student {
+  id               String      @id @default(cuid())
+  userId           String      @unique
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collegeId        String
+  campusId         String?
+  campus           Campus?     @relation(fields: [campusId], references: [id])
+  departmentId     String?
+  department       Department? @relation(fields: [departmentId], references: [id])
+  batchId          String
+  batch            Batch       @relation(fields: [batchId], references: [id])
+  courseId         String
+  course           Course      @relation(fields: [courseId], references: [id])
+  enrollmentNumber String
+
+  aggregate           Float?
+  aggregateType       AggregateType @default(CGPA)
+  tenthScore          Float?
+  tenthScoreType      String?
+  twelfthScore        Float?
+  twelfthScoreType    String?
+  diplomaScore        Float?
+  diplomaScoreType    String?
+  liveBacklogs        Int           @default(0)
+  closedBacklogs      Int           @default(0)
+  academicsVerifiedAt DateTime?
+
+  // Placement Policy gate — decides whether a drive even shows up for this
+  // student. Explicit flags, TPO-overridable, per the RCOEM teardown finding
+  // that this can't be safely inferred.
+  hasPlacementAccess      Boolean @default(true)
+  eligibleForPlacements   Boolean @default(true)
+  interestedInJobs        Boolean @default(true)
+  interestedInInternships Boolean @default(true)
+  placementStatus         String  @default("SEEKING") // SEEKING / PLACED / NOT_INTERESTED / OPTED_OUT
+  policyNotes             String?
+
+  summary               String?
+  rolesResponsibilities String[]
+  expertise             String[]
+  areasOfInterest       String[]
+  values                String[]
+  languagesSpeaking     String[]
+  languagesProgramming  String[]
+  awardsJson            Json?
+  timelineJson          Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Free-text admin tags (e.g. "Top Performer", "Needs Attention") — a plain
+  // string array, same convention as Event.eligibleBatchIds, rather than a
+  // separate tag-catalog model; nothing here needs a controlled vocabulary.
+  tags String[] @default([])
+
+  // A specific staff member assigned to own this student's placement
+  // process — distinct from DepartmentMembership (which is org structure:
+  // who coordinates a department overall), this is a per-student
+  // case-ownership assignment, settable via the bulk "Assign coordinator"
+  // action.
+  assignedCoordinatorId String?
+  assignedCoordinator   User?   @relation("StudentAssignedCoordinator", fields: [assignedCoordinatorId], references: [id], onDelete: SetNull)
+
+  skills               StudentSkill[]
+  experiences          StudentExperience[]
+  projects             StudentProject[]
+  certifications       StudentCertification[]
+  resumes              Resume[]
+  applications         Application[]
+  offers               Offer[]
+  roundCandidacies     RoundCandidate[]
+  eligibilityResults   EligibilityResult[]
+  eligibilityOverrides EligibilityOverride[]
+  documents            StudentDocument[]
+  notes                StudentNote[]
+  backlogs             StudentBacklog[]
+  semesterResults      StudentSemesterResult[]
+  skillProfile         StudentSkillProfile?
+
+  @@unique([collegeId, enrollmentNumber])
+  @@index([collegeId])
+  @@index([batchId])
+  @@index([departmentId])
+  @@map("students")
+}
+
+enum StudentDocumentCategory {
+  RESUME
+  TENTH_MARKSHEET
+  TWELFTH_MARKSHEET
+  DIPLOMA_MARKSHEET
+  SEMESTER_MARKSHEET
+  ID_PROOF
+  CERTIFICATE
+  OFFER_LETTER
+  JOINING_LETTER
+  OTHER
+}
+
+// Same no-object-storage convention as ContactDocument/EventFile — the file
+// is a data URI directly on the row, not a separate File/storage reference.
+model StudentDocument {
+  id           String                  @id @default(cuid())
+  studentId    String
+  student      Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  dataUrl      String                  @db.Text
+  category     StudentDocumentCategory @default(OTHER)
+  uploadedById String?
+  uploadedBy   User?                   @relation("StudentDocumentUploadedBy", fields: [uploadedById], references: [id])
+  verifiedAt   DateTime?
+  verifiedById String?
+  createdAt    DateTime                @default(now())
+
+  @@index([studentId])
+  @@map("student_documents")
+}
+
+// Internal-only notes — never surfaced to the student themselves, same
+// privacy rule as ContactNote/DriveNote.
+model StudentNote {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([studentId])
+  @@map("student_notes")
+}
+
+enum StudentBacklogStatus {
+  ACTIVE
+  CLEARED
+}
+
+// Subject-level backlog detail — Student.liveBacklogs/closedBacklogs stay as
+// the fast denormalised counts the eligibility engine already reads
+// (lib/eligibility.ts's `active_backlogs` field); this is the human-readable
+// detail behind that count, shown on the Academic tab, not a replacement.
+model StudentBacklog {
+  id          String               @id @default(cuid())
+  studentId   String
+  student     Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectName String
+  subjectCode String?
+  semester    Int?
+  attempt     Int                  @default(1)
+  status      StudentBacklogStatus @default(ACTIVE)
+  clearedAt   DateTime?
+  createdAt   DateTime             @default(now())
+
+  @@index([studentId])
+  @@map("student_backlogs")
+}
+
+model StudentSemesterResult {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  semester  Int
+  sgpa      Float
+  credits   Int?
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, semester])
+  @@map("student_semester_results")
+}
+
+// A TPO's personal saved filter combination on the Students list (the
+// preset ones — All/Eligible/Placed/Not Placed/... — are hardcoded query
+// params, same pattern as Events' status tabs; this is only for
+// user-created custom views like "CSE Eligible for TCS").
+model StudentSavedView {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+
+  @@index([collegeId, userId])
+  @@map("student_saved_views")
+}
+
+// Drives list page's user-created custom filter presets — same pattern as
+// StudentSavedView (preset status tabs are hardcoded query params, this is
+// only for a TPO's own saved combos like "My Active Drives").
+model DriveSavedView {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+
+  @@index([collegeId, userId])
+  @@map("drive_saved_views")
+}
+
+model StudentSkill {
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skillId   String
+  skill     Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, skillId])
+  @@map("student_skills")
+}
+
+model StudentExperience {
+  id             String    @id @default(cuid())
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  organisation   String
+  role           String
+  experienceType String? // Internship / Full-time / Freelance
+  startDate      DateTime?
+  endDate        DateTime?
+  description    String?
+  createdAt      DateTime  @default(now())
+
+  @@map("student_experiences")
+}
+
+model StudentProject {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  techStack   String[]
+  url         String?
+  createdAt   DateTime @default(now())
+
+  @@map("student_projects")
+}
+
+model StudentCertification {
+  id            String    @id @default(cuid())
+  studentId     String
+  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name          String
+  issuer        String?
+  issueDate     DateTime?
+  credentialUrl String?
+  createdAt     DateTime  @default(now())
+
+  @@map("student_certifications")
+}
+
+// Multiple named resume versions, one flagged default, each tracking which
+// drives it was submitted to — the pattern the RCOEM teardown flagged as
+// worth cloning directly.
+model Resume {
+  id        String   @id @default(cuid())
+  collegeId String
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name      String
+  fileId    String?
+  file      File?    @relation(fields: [fileId], references: [id])
+  isDefault Boolean  @default(false)
+  isValid   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  usages       ResumeUsage[]
+  applications Application[]
+
+  @@index([studentId])
+  @@map("resumes")
+}
+
+model ResumeUsage {
+  id            String       @id @default(cuid())
+  resumeId      String
+  resume        Resume       @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  driveId       String
+  drive         Drive        @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id])
+  usedAt        DateTime     @default(now())
+
+  @@unique([resumeId, driveId])
+  @@map("resume_usages")
+}
+
+// Private file vault entry — every upload (resume, offer letter, drive
+// document, certificate) goes through this table so access can be logged
+// and revoked centrally, even though actual object storage is a pluggable
+// backend (defaults to a local/dev stub — see lib/storage.ts).
+model File {
+  id           String         @id @default(cuid())
+  collegeId    String?
+  college      College?       @relation(fields: [collegeId], references: [id])
+  storageKey   String
+  // Real object storage isn't wired up — same "store the bytes directly on
+  // the row" convention as StudentDocument/CompanyDocument/ContactDocument/
+  // EventFile. Nullable because rows created before this field existed have
+  // no bytes and stay honestly undownloadable rather than backfilled.
+  dataUrl      String?        @db.Text
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  visibility   FileVisibility @default(PRIVATE)
+  uploadedById String?
+  uploadedBy   User?          @relation("FileUploadedBy", fields: [uploadedById], references: [id])
+  createdAt    DateTime       @default(now())
+
+  resumes        Resume[]
+  driveDocuments DriveDocument[]
+  offers         Offer[]
+  accessLogs     FileAccessLog[]
+
+  @@index([collegeId])
+  @@map("files")
+}
+
+model FileAccessLog {
+  id           String   @id @default(cuid())
+  fileId       String
+  file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  accessedById String?
+  accessedAt   DateTime @default(now())
+
+  @@map("file_access_logs")
+}
+
+// ============================================================
+// Companies & recruiter portal — the side POD does not expose. A Company is
+// a global entity (it can partner with many colleges); CompanyUser accounts
+// authenticate independently of any college.
+// ============================================================
+
+model Company {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  legalName    String?
+  website      String?
+  industryType String?
+  companyType  String?
+  logoUrl      String?
+  about        String?
+  size         String?
+  headquarters String?
+  foundedYear  Int?
+  linkedinUrl  String?
+  tags         String[] @default([])
+  createdAt    DateTime @default(now())
+
+  // Hiring preference — a lightweight, non-rule-tree profile (unlike
+  // DriveEligibilityRule's full AND/OR/NOT engine) used only for the "N
+  // students eligible" preview and to prefill a new drive's eligibility
+  // step. Empty preferredCourseIds means "no course preference recorded".
+  hiringType         String?
+  preferredCourseIds String[] @default([])
+  minCgpaPreference  Decimal? @db.Decimal(4, 2)
+  backlogPolicy      String?
+  preferredSkillIds  String[] @default([])
+
+  users        CompanyUser[]
+  partnerships CollegePartnership[]
+  drives       Drive[]
+  contacts     Contact[]
+  notes        CompanyNote[]
+  events       Event[]
+  documents    CompanyDocument[]
+  revenues     PlacementRevenue[]
+
+  @@map("companies")
+}
+
+enum CompanyDocumentCategory {
+  MOU
+  NDA
+  JOB_DESCRIPTION
+  OFFER_TEMPLATE
+  BROCHURE
+  HIRING_POLICY
+  SALARY_STRUCTURE
+  OTHER
+}
+
+// Tenant-scoped even though Company itself is global — a MOU one college
+// uploads for a shared company must never be visible to another college's
+// TPO, same reasoning as Contact being tenant-scoped despite pointing at a
+// global Company.
+model CompanyDocument {
+  id           String                  @id @default(cuid())
+  collegeId    String
+  college      College                 @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  companyId    String
+  company      Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category     CompanyDocumentCategory @default(OTHER)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  dataUrl      String                  @db.Text
+  uploadedById String?
+  uploadedBy   User?                   @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime                @default(now())
+
+  @@index([collegeId])
+  @@index([companyId])
+  @@map("company_documents")
+}
+
+model CompanyUser {
+  id           String     @id @default(cuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email        String     @unique
+  passwordHash String
+  name         String
+  phone        String?
+  isOwner      Boolean    @default(false)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+
+  @@index([companyId])
+  @@map("company_users")
+}
+
+// A company must be connected to a college before it can post/see drives
+// there — mirrors how a TPO would vet a recruiter before granting access.
+model CollegePartnership {
+  id          String            @id @default(cuid())
+  collegeId   String
+  college     College           @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  companyId   String
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  status      PartnershipStatus @default(PENDING)
+  invitedAt   DateTime          @default(now())
+  connectedAt DateTime?
+
+  @@unique([collegeId, companyId])
+  @@map("college_partnerships")
+}
+
+model CompanyNote {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@map("company_notes")
+}
+
+// Package-tier policy bucket (e.g. "Dream", "Super Dream", "Core",
+// "Mass Recruiter"). Drives get tagged with one so the college can cap how
+// many offers a student is allowed to hold within that tier — the same
+// "Categories" concept POD's placement console uses.
+model PlacementCategory {
+  id                  String   @id @default(cuid())
+  collegeId           String
+  college             College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name                String
+  minPackage          Decimal? @db.Decimal(12, 2)
+  maxPackage          Decimal? @db.Decimal(12, 2)
+  maxOffersPerStudent Int?
+  createdAt           DateTime @default(now())
+
+  drives Drive[]
+
+  @@index([collegeId])
+  @@map("placement_categories")
+}
+
+// ============================================================
+// Placement finance — expenses the placement cell incurs running drives
+// and events, and revenue it receives (recruitment fees, sponsorships).
+// Deliberately two separate flat models rather than one "transaction"
+// model with a signed amount: expense categories (venue, catering,
+// travel) and revenue sources (company fee, sponsorship, grant) are
+// different enough vocabularies that merging them would need a
+// type-discriminator anyway, and TPOs conceptually think in terms of
+// "what did we spend" vs "what did we bring in", not a single ledger.
+// Both link loosely to a Drive/Event/Company (all optional) so a line
+// item can be tied to what it was for, without forcing every entry to
+// have one — general department overhead (e.g. a shared drive-management
+// software subscription) has no natural Drive/Event to attach to.
+// ============================================================
+
+model PlacementExpense {
+  id          String   @id @default(cuid())
+  collegeId   String
+  college     College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  // Free-text like Company.industryType/Contact.relationshipStage — the
+  // fixed option list lives in lib/validators/finance.ts, not an enum, so
+  // it can grow without a migration.
+  category    String
+  description String
+  amount      Decimal  @db.Decimal(12, 2)
+  expenseDate DateTime
+
+  driveId String?
+  drive   Drive?  @relation(fields: [driveId], references: [id], onDelete: SetNull)
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  recordedById String
+  recordedBy   User     @relation("PlacementExpenseRecordedBy", fields: [recordedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([collegeId])
+  @@index([driveId])
+  @@index([eventId])
+  @@map("placement_expenses")
+}
+
+model PlacementRevenue {
+  id           String   @id @default(cuid())
+  collegeId    String
+  college      College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  source       String
+  description  String
+  amount       Decimal  @db.Decimal(12, 2)
+  receivedDate DateTime
+
+  // Company is global (not tenant-scoped) — same pattern as Contact and
+  // CompanyDocument: this row is tenant-scoped by collegeId, but the
+  // company it references can be partnered with many colleges.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  driveId   String?
+  drive     Drive?   @relation(fields: [driveId], references: [id], onDelete: SetNull)
+  eventId   String?
+  event     Event?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  recordedById String
+  recordedBy   User     @relation("PlacementRevenueRecordedBy", fields: [recordedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([collegeId])
+  @@index([driveId])
+  @@index([eventId])
+  @@map("placement_revenues")
+}
+
+// A line item from the annual CDPC budget note submitted for approval —
+// e.g. "CDPC Expenditure for Hospitality, travel and conduction of campus
+// drives: ₹30L allotted for 2025-26, ₹10L utilized, ₹30L requested for
+// 2026-27". allottedAmount/utilizedAmount describe the PRIOR year (the one
+// being reviewed); requestedAmount is the ask for `fiscalYear` itself — the
+// same three-column shape the real office-note document uses, so entering
+// data here is a direct transcription rather than a reinterpretation.
+// Deliberately nullable: a brand-new ask (e.g. "Global Certification
+// Training") legitimately has no prior allotment/utilization to report,
+// which is different from an allotment of literally ₹0.
+model Budget {
+  id String @id @default(cuid())
+
+  collegeId String
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  // e.g. "2026-2027" — the year this budget note's `requestedAmount` is for.
+  fiscalYear String
+  // Free-text grouping, e.g. "Placement Activities" / "Capacity Building /
+  // Training of Students" — mirrors the office note's "Parameters" column.
+  category   String
+  item       String
+
+  allottedAmount  Decimal? @db.Decimal(14, 2)
+  utilizedAmount  Decimal? @db.Decimal(14, 2)
+  requestedAmount Decimal? @db.Decimal(14, 2)
+
+  // Preserves the office note's row order within a category — an amount
+  // table reads oddly re-sorted alphabetically.
+  order Int @default(0)
+
+  createdById String
+  createdBy   User     @relation("BudgetCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([collegeId])
+  @@index([collegeId, fiscalYear])
+  @@map("budgets")
+}
+
+// ============================================================
+// Drives (Placement Events) — the central object. A Drive is the
+// company-level event; DrivePosition is the specific role(s) within it, so
+// one drive ("Capgemini Campus Drive 2026") can carry both an "Analyst" and
+// a "Senior Analyst" position with different CTC/skills/openings.
+// ============================================================
+
+model Drive {
+  id           String             @id @default(cuid())
+  collegeId    String
+  college      College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  batchId      String
+  batch        Batch              @relation(fields: [batchId], references: [id])
+  departmentId String
+  department   Department         @relation(fields: [departmentId], references: [id])
+  companyId    String
+  company      Company            @relation(fields: [companyId], references: [id])
+  createdById  String
+  categoryId   String?
+  category     PlacementCategory? @relation(fields: [categoryId], references: [id])
+  // The placement-team member responsible for running this drive day to
+  // day — distinct from createdById (who set it up, never changes) and
+  // assignable/reassignable via the bulk "Assign Owner" action.
+  ownerId      String?
+  owner        User?              @relation("DriveOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  title            String
+  status           DriveStatus      @default(DRAFT)
+  sourceType       SourceType       @default(SELF)
+  locationCategory LocationCategory @default(ON_CAMPUS)
+  driveTypeLabel   String           @default("Recruitment")
+  // Marked via "Save as Template" on an existing drive — surfaces it in the
+  // Create Drive dropdown's "Create From Template" picker, same underlying
+  // duplicate mechanism as "Duplicate Existing Drive" just filtered to
+  // drives explicitly opted in as reusable starting points.
+  isTemplate       Boolean          @default(false)
+
+  expectedOpenings        Int?
+  eligibilityCriteria     String?
+  selectionProcessDetails String?
+  otherDetails            String?
+  contactPersons          String?
+  companyPersonContact    String?
+
+  registrationOpensAt        DateTime?
+  registrationClosesAt       DateTime?
+  selectionStartsAt          DateTime?
+  selectionEndsAt            DateTime?
+  driveScheduledAt           DateTime?
+  submittedForApprovalAt     DateTime?
+  approvedAt                 DateTime?
+  publishedAt                DateTime?
+  // Set once the registration-closing-soon reminder has fired for this
+  // drive, so an hourly cron sweep doesn't re-notify the same students
+  // every run while the drive sits inside the reminder window.
+  registrationReminderSentAt DateTime?
+
+  // Denormalised funnel counters — recomputing these with live aggregate
+  // queries on every dashboard/report render doesn't hold up once a college
+  // has hundreds of drives; these are updated transactionally alongside the
+  // writes that change them (see lib/drives/counters.ts).
+  eligibleCount    Int @default(0)
+  appliedCount     Int @default(0)
+  approvedCount    Int @default(0)
+  shortlistedCount Int @default(0)
+  offerCount       Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  positions            DrivePosition[]
+  eligibleCourses      DriveCourse[]
+  requiredSkills       DriveSkill[]
+  eligibilityRules     DriveEligibilityRule[]
+  eligibilitySnapshots EligibilitySnapshot[]
+  eligibilityOverrides EligibilityOverride[]
+  applications         Application[]
+  offers               Offer[]
+  rounds               SelectionRound[]
+  historyEntries       DriveHistoryEntry[]
+  resumeUsages         ResumeUsage[]
+  documents            DriveDocument[]
+  notes                DriveNote[]
+  applicationFields    DriveApplicationField[]
+  conversations        Conversation[]          @relation("ConversationDrive")
+  events               Event[]                 @relation("EventDrive")
+  expenses             PlacementExpense[]
+  revenues             PlacementRevenue[]
+
+  @@index([collegeId])
+  @@index([departmentId])
+  @@index([batchId, status])
+  @@map("drives")
+}
+
+// One or more roles within a drive.
+model DrivePosition {
+  id                   String         @id @default(cuid())
+  collegeId            String
+  driveId              String
+  drive                Drive          @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  title                String
+  positionType         PositionType   @default(JOB)
+  employmentType       EmploymentType @default(FULL_TIME)
+  minCtc               Decimal?       @db.Decimal(12, 2)
+  maxCtc               Decimal?       @db.Decimal(12, 2)
+  fixedCompensation    Decimal?       @db.Decimal(12, 2)
+  variableCompensation Decimal?       @db.Decimal(12, 2)
+  stipend              Decimal?       @db.Decimal(10, 2)
+  joiningBonus         Decimal?       @db.Decimal(10, 2)
+  openings             Int?
+  createdAt            DateTime       @default(now())
+
+  applications Application[]
+  offers       Offer[]
+
+  @@index([driveId])
+  @@map("drive_positions")
+}
+
+model DriveCourse {
+  driveId  String
+  drive    Drive  @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([driveId, courseId])
+  @@map("drive_courses")
+}
+
+model DriveSkill {
+  driveId String
+  drive   Drive  @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  skillId String
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([driveId, skillId])
+  @@map("drive_skills")
+}
+
+model DriveDocument {
+  id        String   @id @default(cuid())
+  driveId   String
+  drive     Drive    @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id])
+  label     String?
+  createdAt DateTime @default(now())
+
+  @@map("drive_documents")
+}
+
+// Audit log of every change to a drive — "History Trail" on POD.
+model DriveHistoryEntry {
+  id        String   @id @default(cuid())
+  driveId   String
+  drive     Drive    @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id])
+  action    String
+  changes   Json?
+  createdAt DateTime @default(now())
+
+  @@index([driveId])
+  @@map("drive_history_entries")
+}
+
+// Internal comment thread on a drive, TPO-team-only — "Notes" on POD.
+model DriveNote {
+  id        String   @id @default(cuid())
+  driveId   String
+  drive     Drive    @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([driveId])
+  @@map("drive_notes")
+}
+
+enum ApplicationFieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+}
+
+// Extra per-drive fields a TPO can define, collected on top of the fixed
+// Application fields when a student applies — "Application Fields" on POD.
+model DriveApplicationField {
+  id        String               @id @default(cuid())
+  driveId   String
+  drive     Drive                @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  label     String
+  fieldType ApplicationFieldType @default(TEXT)
+  options   String[]
+  required  Boolean              @default(false)
+  order     Int                  @default(0)
+  createdAt DateTime             @default(now())
+
+  values ApplicationFieldValue[]
+
+  @@index([driveId])
+  @@map("drive_application_fields")
+}
+
+model ApplicationFieldValue {
+  id            String                @id @default(cuid())
+  applicationId String
+  application   Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fieldId       String
+  field         DriveApplicationField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  value         String
+
+  @@unique([applicationId, fieldId])
+  @@map("application_field_values")
+}
+
+model ApplicationNote {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User        @relation(fields: [authorId], references: [id])
+  body          String
+  createdAt     DateTime    @default(now())
+
+  @@index([applicationId])
+  @@map("application_notes")
+}
+
+// Applications list page's user-created custom filter presets — same
+// pattern as DriveSavedView/StudentSavedView.
+model ApplicationSavedView {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+
+  @@index([collegeId, userId])
+  @@map("application_saved_views")
+}
+
+// ============================================================
+// Eligibility engine — the "product brain". A rule is a versioned AND/OR/NOT
+// tree over student fields; publishing a version evaluates every student in
+// the drive's batch and freezes the result as a Snapshot so a later CGPA
+// correction can't silently rewrite a finalized drive's history.
+// ============================================================
+
+model DriveEligibilityRule {
+  id            String    @id @default(cuid())
+  collegeId     String
+  driveId       String
+  drive         Drive     @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  version       Int
+  isPublished   Boolean   @default(false)
+  logic         Json // { operator: "AND", children: [{field,operator,value}, ...] }
+  publishedAt   DateTime?
+  publishedById String?
+  createdById   String
+  createdAt     DateTime  @default(now())
+
+  @@unique([driveId, version])
+  @@map("drive_eligibility_rules")
+}
+
+model EligibilitySnapshot {
+  id           String   @id @default(cuid())
+  collegeId    String
+  driveId      String
+  drive        Drive    @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  ruleVersion  Int
+  studentCount Int
+  createdAt    DateTime @default(now())
+
+  results EligibilityResult[]
+
+  @@index([driveId])
+  @@map("eligibility_snapshots")
+}
+
+model EligibilityResult {
+  id          String              @id @default(cuid())
+  collegeId   String
+  snapshotId  String
+  snapshot    EligibilitySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  eligible    Boolean
+  explanation Json // [{field, operator, expected, actual, passed}, ...]
+  evaluatedAt DateTime            @default(now())
+
+  applications Application[]
+
+  @@unique([snapshotId, studentId])
+  @@index([studentId])
+  @@map("eligibility_results")
+}
+
+model EligibilityOverride {
+  id           String              @id @default(cuid())
+  collegeId    String
+  driveId      String
+  drive        Drive               @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  decision     EligibilityDecision
+  reason       String
+  createdById  String
+  approvedById String?
+  createdAt    DateTime            @default(now())
+  expiresAt    DateTime?
+
+  @@index([driveId])
+  @@map("eligibility_overrides")
+}
+
+// ============================================================
+// Applications, status history, selection rounds, offers
+// ============================================================
+
+model Application {
+  id                  String             @id @default(cuid())
+  collegeId           String
+  studentId           String
+  student             Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  driveId             String
+  drive               Drive              @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  positionId          String
+  position            DrivePosition      @relation(fields: [positionId], references: [id])
+  resumeId            String?
+  resume              Resume?            @relation(fields: [resumeId], references: [id])
+  eligibilityResultId String?
+  eligibilityResult   EligibilityResult? @relation(fields: [eligibilityResultId], references: [id])
+  status              ApplicationStatus  @default(APPLIED)
+
+  // Skill-overlap match score between the student and the drive's required
+  // skills — a real, if simple, algorithm today; swappable for a model-based
+  // one later without touching the schema (see lib/matching.ts).
+  matchScore    Int?
+  matchedSkills String[]
+  missingSkills String[]
+
+  appliedAt   DateTime  @default(now())
+  approvedAt  DateTime?
+  withdrawnAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  // Case ownership + urgency — same "settable via bulk action, no separate
+  // picker page" pattern as Student.assignedCoordinatorId / Drive.ownerId.
+  ownerId  String?
+  owner    User?   @relation("ApplicationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  priority String  @default("NORMAL") // NORMAL / HIGH / URGENT
+
+  statusHistory    ApplicationStatusHistory[]
+  offer            Offer?
+  roundCandidacies RoundCandidate[]
+  resumeUsages     ResumeUsage[]
+  fieldValues      ApplicationFieldValue[]
+  notes            ApplicationNote[]
+
+  @@unique([driveId, positionId, studentId])
+  @@index([driveId])
+  @@index([studentId])
+  @@map("applications")
+}
+
+model ApplicationStatusHistory {
+  id            String             @id @default(cuid())
+  collegeId     String
+  applicationId String
+  application   Application        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  reason        String?
+  changedById   String
+  createdAt     DateTime           @default(now())
+
+  @@index([applicationId])
+  @@map("application_status_history")
+}
+
+// A round belongs to a drive (e.g. "Round 1 — Online Assessment", "Round 2 —
+// Technical Interview"). RoundCandidate is one application's participation
+// in that round, carrying scheduling, score and result inline — a
+// deliberate simplification of the freeze pack's five-table round model
+// (SelectionRound/RoundCandidate/Interview/RoundScore/RoundResult collapse
+// into two) since one college's actual usage rarely needs interviewer-level
+// normalization in v1.
+model SelectionRound {
+  id             String      @id @default(cuid())
+  collegeId      String
+  driveId        String
+  drive          Drive       @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  name           String
+  roundType      String // Aptitude / Coding / GD / Technical / HR / Custom
+  sequenceNo     Int
+  status         RoundStatus @default(DRAFT)
+  scheduledStart DateTime?
+  scheduledEnd   DateTime?
+  createdAt      DateTime    @default(now())
+
+  candidates RoundCandidate[]
+
+  @@unique([driveId, sequenceNo])
+  @@map("selection_rounds")
+}
+
+model RoundCandidate {
+  id                String               @id @default(cuid())
+  collegeId         String
+  roundId           String
+  round             SelectionRound       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  applicationId     String
+  application       Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  studentId         String
+  student           Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status            RoundCandidateStatus @default(ASSIGNED)
+  mode              InterviewMode        @default(ONLINE)
+  scheduledAt       DateTime?
+  venue             String?
+  meetingUrl        String?
+  // interviewerId is set when the interviewer is an actual staff account in
+  // this college (so they can see it on their own /my-interviews
+  // dashboard); interviewerName stays for external/unlinked interviewers
+  // (alumni, outside panelists) who never had a login here. When both are
+  // set, interviewerName is treated as a display-name override.
+  interviewerId     String?
+  interviewer       User?                @relation("InterviewerAssignments", fields: [interviewerId], references: [id], onDelete: SetNull)
+  interviewerName   String?
+  score             Int?
+  feedback          String?
+  // Structured evaluation fields — real, stored, distinct from the free-text
+  // `feedback` above.
+  strengths         String?
+  weaknesses        String?
+  recommendation    String? // STRONG_HIRE / HIRE / HOLD / REJECT — validated in lib/validators/round.ts, not an enum, same pattern as Contact.relationshipStage
+  // Per-criterion scores against the round's ScorecardTemplate (if one
+  // exists for this roundType) — {criterionKey: score}. `score` above stays
+  // the single source of truth for pass/fail purposes; when a template is
+  // used, score is the average of these, computed at save time (not stored
+  // twice as an invariant to keep in sync — recomputed whenever criteriaScores changes).
+  criteriaScores    Json?
+  checkedInAt       DateTime?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  noShowReason      String?
+  reminderSentAt    DateTime?
+  resultPublishedAt DateTime?
+  assignedAt        DateTime             @default(now())
+
+  panelMembers InterviewPanelMember[]
+
+  @@unique([roundId, applicationId])
+  @@index([roundId])
+  @@map("round_candidates")
+}
+
+// Admin-configurable evaluation rubric, one per (collegeId, roundType) —
+// e.g. "Technical" gets Technical Knowledge/Coding/Problem Solving/DSA/
+// System Design, "HR" gets Communication/Confidence/Culture Fit. Rounds
+// whose roundType has no template here just keep using the plain overall
+// score, same as before this feature existed.
+model ScorecardTemplate {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  roundType String
+  criteria  Json // [{ key: string, label: string }]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([collegeId, roundType])
+  @@map("scorecard_templates")
+}
+
+// Additional interviewers beyond the single interviewerName field on
+// RoundCandidate — each panel member can leave their own score/feedback.
+// This is supplementary, informational data: the RoundCandidate.score/
+// status stay the one authoritative pass/fail decision (set via the normal
+// Evaluate action by whoever has round.score), not an automatic average of
+// panel scores — that keeps "who actually decided this" unambiguous.
+model InterviewPanelMember {
+  id               String         @id @default(cuid())
+  collegeId        String
+  roundCandidateId String
+  roundCandidate   RoundCandidate @relation(fields: [roundCandidateId], references: [id], onDelete: Cascade)
+  name             String
+  role             String         @default("Panel Member") // Lead Interviewer / Panel Member
+  score            Int?
+  feedback         String?
+  createdAt        DateTime       @default(now())
+
+  @@index([roundCandidateId])
+  @@map("interview_panel_members")
+}
+
+model Offer {
+  id            String         @id @default(cuid())
+  collegeId     String
+  applicationId String?        @unique
+  application   Application?   @relation(fields: [applicationId], references: [id])
+  studentId     String
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  driveId       String
+  drive         Drive          @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  positionId    String?
+  position      DrivePosition? @relation(fields: [positionId], references: [id])
+
+  offerType            OfferType   @default(JOB)
+  status               OfferStatus @default(DRAFT)
+  fixedCompensation    Decimal?    @db.Decimal(12, 2)
+  variableCompensation Decimal?    @db.Decimal(12, 2)
+  totalCompensation    Decimal     @db.Decimal(12, 2)
+  stipend              Decimal?    @db.Decimal(10, 2)
+  durationMonths       Int?
+  joiningBonus         Decimal?    @db.Decimal(10, 2)
+  offerDate            DateTime?
+  joiningDate          DateTime?
+  offerLetterFileId    String?
+  offerLetterFile      File?       @relation(fields: [offerLetterFileId], references: [id])
+
+  issuedAt    DateTime?
+  acceptedAt  DateTime?
+  declinedAt  DateTime?
+  withdrawnAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  joiningRecord JoiningRecord?
+
+  @@index([driveId])
+  @@index([studentId, status])
+  @@map("offers")
+}
+
+model JoiningRecord {
+  id                String    @id @default(cuid())
+  collegeId         String
+  offerId           String    @unique
+  offer             Offer     @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  joiningStatus     String    @default("PENDING") // PENDING / JOINED / DID_NOT_JOIN / DEFERRED
+  actualJoiningDate DateTime?
+  reason            String?
+  verifiedAt        DateTime?
+  verifiedById      String?
+
+  @@map("joining_records")
+}
+
+// ============================================================
+// Contacts (recruiter CRM)
+// ============================================================
+
+// Relationship stage in the recruiter CRM funnel — a plain string (not an
+// enum) so the fixed option list lives in lib/validators/contact.ts and can
+// grow without a migration; validated there against RELATIONSHIP_STAGES.
+model Contact {
+  id                String    @id @default(cuid())
+  collegeId         String
+  college           College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  companyId         String?
+  company           Company?  @relation(fields: [companyId], references: [id])
+  name              String?
+  email             String?
+  phone             String?
+  contactType       String?
+  designation       String?
+  department        String?
+  location          String?
+  linkedinUrl       String?
+  photoUrl          String?
+  relationshipStage String    @default("NEW")
+  isActive          Boolean   @default(true)
+  relationshipSince DateTime?
+  ownerId           String?
+  owner             User?     @relation("ContactOwner", fields: [ownerId], references: [id])
+  tags              String[]
+  nextFollowUpAt    DateTime?
+  nextFollowUpNote  String?
+  addedById         String
+  addedBy           User      @relation("ContactAddedBy", fields: [addedById], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  communications ContactCommunication[]
+  notes          ContactNote[]
+  documents      ContactDocument[]
+  history        ContactHistoryEntry[]
+
+  @@index([collegeId])
+  @@index([companyId])
+  @@map("contacts")
+}
+
+// Audit trail of record-level changes to a contact (created, stage changed,
+// owner reassigned, active/inactive toggled, follow-up scheduled/completed)
+// — distinct from Communication (external outreach) and Notes (free-form
+// internal comments), which have their own tabs. Written at every mutating
+// contact route so this is never seed-only decoration.
+model ContactHistoryEntry {
+  id        String   @id @default(cuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation("ContactHistoryActor", fields: [actorId], references: [id])
+  action    String
+  createdAt DateTime @default(now())
+
+  @@map("contact_history_entries")
+}
+
+model ContactDocument {
+  id           String   @id @default(cuid())
+  contactId    String
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  dataUrl      String   @db.Text
+  uploadedById String?
+  uploadedBy   User?    @relation("ContactDocumentUploadedBy", fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@map("contact_documents")
+}
+
+enum ContactCommunicationType {
+  EMAIL_SENT
+  EMAIL_RECEIVED
+  CALL
+  MEETING
+  NOTE
+  MESSAGE
+}
+
+// The "Communication" timeline tab on Contact 360 — a structured log of
+// outreach events, distinct from ContactNote's free-form internal notes.
+model ContactCommunication {
+  id         String                   @id @default(cuid())
+  contactId  String
+  contact    Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User                     @relation(fields: [authorId], references: [id])
+  type       ContactCommunicationType
+  subject    String?
+  body       String?
+  occurredAt DateTime                 @default(now())
+  createdAt  DateTime                 @default(now())
+
+  @@index([contactId])
+  @@map("contact_communications")
+}
+
+model ContactNote {
+  id        String   @id @default(cuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+  @@map("contact_notes")
+}
+
+// ============================================================
+// Feed content — Posts (general / expert session / competition)
+// ============================================================
+
+// A reusable speaker directory entry — building a real profile once (rather
+// than a free-text name on the event) lets a speaker be picked again on a
+// future event and lets the college see "how many sessions has this person
+// run for us."
+model EventSpeaker {
+  id           String   @id @default(cuid())
+  collegeId    String
+  college      College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name         String
+  designation  String?
+  organization String?
+  email        String?
+  phone        String?
+  bio          String?
+  linkedinUrl  String?
+  createdById  String
+  createdBy    User     @relation(fields: [createdById], references: [id])
+  createdAt    DateTime @default(now())
+
+  events Event[]
+
+  @@index([collegeId])
+  @@map("event_speakers")
+}
+
+// The Placement Events & Engagement Center's core model — replaces the
+// earlier bare "Post" community-feed model with a real event lifecycle:
+// draft → published → registration → attendance → feedback → analytics.
+//
+// Status is deliberately NOT a persisted enum with manual transitions —
+// this app has no background job runner (same constraint noted throughout
+// lib/audit.ts, MessageDraft, etc.), so a persisted "LIVE" status would
+// silently go stale the moment nobody happens to load the page at the right
+// time. Instead status is derived on every read from `publishedAt`,
+// `cancelledAt` and the four scheduling timestamps — see
+// lib/events/status.ts. The only two manual actions are Publish
+// (sets publishedAt) and Cancel (sets cancelledAt); everything else
+// (Scheduled → Registration Open → Registration Closed → Live → Completed)
+// falls out of comparing `now` to the timestamps below.
+model Event {
+  id          String  @id @default(cuid())
+  collegeId   String
+  college     College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User    @relation("EventCreator", fields: [createdById], references: [id])
+
+  category       EventCategory @default(GENERAL)
+  title          String
+  description    String
+  coverImageUrl  String?
+  // Free-text display label (e.g. "Placement Cell", "CDPC") — deliberately
+  // not a User/Department FK: the mockup's "Organizer" field is a team name,
+  // not a specific account, and forcing it onto a real relation would block
+  // events organized by an external partner with no account in this college.
+  organizerLabel String?
+
+  mode       EventMode @default(OFFLINE)
+  venue      String?
+  meetingUrl String?
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  registrationOpensAt  DateTime?
+  registrationClosesAt DateTime?
+  capacity             Int?
+  approvalRequired     Boolean   @default(false)
+
+  // Eligibility reuses the exact same AND/OR/NOT logic tree already proven
+  // for Drives (lib/eligibility.ts / DriveEligibilityRule) so "why is this
+  // student not eligible" stays explainable the same way. null = open to
+  // everyone (subject to the batch/department scoping below).
+  eligibilityLogic      Json?
+  eligibleBatchIds      String[] // empty = all batches
+  eligibleDepartmentIds String[] // empty = all departments
+
+  speakerId String?
+  speaker   EventSpeaker? @relation(fields: [speakerId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  driveId String?
+  drive   Drive?  @relation("EventDrive", fields: [driveId], references: [id], onDelete: SetNull)
+
+  certificateEnabled Boolean @default(false)
+  feedbackEnabled    Boolean @default(true)
+
+  publishedAt  DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  registrations EventRegistration[]
+  attendances   EventAttendance[]
+  feedback      EventFeedback[]
+  files         EventFile[]
+  certificates  EventCertificate[]
+  expenses      PlacementExpense[]
+  revenues      PlacementRevenue[]
+
+  @@index([collegeId])
+  @@index([category])
+  @@map("events")
+}
+
+model EventRegistration {
+  id            String                  @id @default(cuid())
+  eventId       String
+  event         Event                   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        EventRegistrationStatus @default(CONFIRMED)
+  registeredAt  DateTime                @default(now())
+  respondedAt   DateTime?
+  respondedById String?
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_registrations")
+}
+
+// One row per (event, user) — checkInAt/checkOutAt are set independently so
+// "registered but never checked in" (no row created until first scan/mark)
+// and "checked in, never checked out" are both representable without a
+// separate status enum.
+model EventAttendance {
+  id         String                @id @default(cuid())
+  eventId    String
+  event      Event                 @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkInAt  DateTime?
+  checkOutAt DateTime?
+  method     EventAttendanceMethod @default(MANUAL)
+  markedById String?
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_attendances")
+}
+
+model EventFeedback {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating      Int
+  answers     Json?
+  anonymous   Boolean  @default(false)
+  submittedAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_feedback")
+}
+
+model EventFile {
+  id           String            @id @default(cuid())
+  eventId      String
+  event        Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User              @relation(fields: [uploadedById], references: [id])
+  name         String
+  url          String            @db.Text
+  category     EventFileCategory @default(OTHER)
+  createdAt    DateTime          @default(now())
+
+  @@index([eventId])
+  @@map("event_files")
+}
+
+// `code` is a short, unique, human-typeable verification code printed on the
+// certificate itself — there's no PDF-generation dependency in this repo, so
+// certificates are rendered on demand as a printable page
+// (see the certificates route) rather than stored as a binary.
+model EventCertificate {
+  id         String   @id @default(cuid())
+  eventId    String
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String   @unique
+  issuedAt   DateTime @default(now())
+  issuedById String
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_certificates")
+}
+
+enum BroadcastAudienceType {
+  ALL_STUDENTS
+  ALL_STAFF
+  BATCH
+  DEPARTMENT
+  COURSE
+  ROLE
+}
+
+enum BroadcastStatus {
+  DRAFT
+  SENT
+}
+
+// A reusable message body (e.g. "Drive reminder", "Document request") a TPO
+// can pick when composing a Broadcast instead of retyping the same copy.
+// Purely a compose-time convenience — sending a Broadcast copies the text in,
+// it does not keep a live link back to the template afterward.
+model MessageTemplate {
+  id          String   @id @default(cuid())
+  collegeId   String
+  college     College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  name        String
+  subject     String
+  body        String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([collegeId])
+  @@map("message_templates")
+}
+
+// A one-shot message fanned out to a targeted audience of Users, delivered
+// as real Notification rows (see lib/notify.ts) — channel is IN_APP today,
+// EMAIL/SMS/WHATSAPP are catalogued on NotificationChannel but not wired to
+// an outbound provider in this build.
+model Broadcast {
+  id                   String                @id @default(cuid())
+  collegeId            String
+  college              College               @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  createdById          String
+  subject              String
+  body                 String
+  audienceType         BroadcastAudienceType
+  audienceBatchId      String?
+  audienceDepartmentId String?
+  audienceCourseId     String?
+  audienceRole         String?
+  status               BroadcastStatus       @default(DRAFT)
+  sentAt               DateTime?
+  createdAt            DateTime              @default(now())
+
+  recipients BroadcastRecipient[]
+
+  @@index([collegeId])
+  @@map("broadcasts")
+}
+
+model BroadcastRecipient {
+  id          String    @id @default(cuid())
+  broadcastId String
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, userId])
+  @@index([userId])
+  @@map("broadcast_recipients")
+}
+
+// ============================================================
+// Messaging
+// ============================================================
+
+model Conversation {
+  id          String   @id @default(cuid())
+  collegeId   String
+  college     College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  isGroup     Boolean  @default(false)
+  name        String?
+  createdById String
+  createdBy   User     @relation("ConversationCreator", fields: [createdById], references: [id])
+  // Optional link to the drive this conversation is about, so the thread can
+  // show live drive context (applications/shortlisted/offers) instead of the
+  // TPO having to open another screen to remember why they're talking.
+  driveId     String?
+  drive       Drive?   @relation("ConversationDrive", fields: [driveId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  drafts       MessageDraft[]
+
+  @@index([collegeId])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+  starred        Boolean      @default(false)
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+// A message written now and kept for the author to send later themselves.
+// Deliberately NOT auto-sending scheduled delivery: this app has no
+// background job runner, so a "send at 9am" promise would silently depend on
+// somebody happening to load a page. `remindAt` is a note-to-self shown in
+// the UI, not a delivery guarantee.
+model MessageDraft {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation("MessageDraftAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body           String
+  remindAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId, authorId])
+  @@map("message_drafts")
+}
+
+model Message {
+  id                  String       @id @default(cuid())
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId            String?
+  sender              User?        @relation("MessageSender", fields: [senderId], references: [id])
+  body                String
+  systemGenerated     Boolean      @default(false)
+  attachmentUrl       String?      @db.Text
+  attachmentName      String?
+  attachmentMimeType  String?
+  attachmentSizeBytes Int?
+  createdAt           DateTime     @default(now())
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+// ============================================================
+// Forums — built as a real, working feature (POD's own instance had zero
+// forums in use, so there was nothing to model from — this is new).
+// ============================================================
+
+model Forum {
+  id          String   @id @default(cuid())
+  collegeId   String
+  college     College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  createdById String
+  createdBy   User     @relation("ForumCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  posts ForumPost[]
+
+  @@index([collegeId])
+  @@map("forums")
+}
+
+model ForumPost {
+  id        String   @id @default(cuid())
+  forumId   String
+  forum     Forum    @relation(fields: [forumId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+
+  replies ForumReply[]
+
+  @@index([forumId])
+  @@map("forum_posts")
+}
+
+model ForumReply {
+  id          String    @id @default(cuid())
+  forumPostId String
+  forumPost   ForumPost @relation(fields: [forumPostId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  body        String
+  createdAt   DateTime  @default(now())
+
+  @@index([forumPostId])
+  @@map("forum_replies")
+}
+
+// ============================================================
+// Notifications — with real per-channel preferences (a gap flagged in the
+// POD teardown, where only a single in-app feed existed).
+// ============================================================
+
+model Notification {
+  id           String              @id @default(cuid())
+  collegeId    String
+  college      College             @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType    String
+  channel      NotificationChannel @default(IN_APP)
+  title        String
+  body         String
+  link         String?
+  status       String              @default("SENT") // QUEUED / SENT / FAILED
+  readAt       DateTime?
+  createdAt    DateTime            @default(now())
+  pushDelivery PushDelivery?
+
+  @@index([userId])
+  @@index([collegeId])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType String
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+
+  @@unique([userId, eventType, channel])
+  @@map("notification_preferences")
+}
+
+model PushSubscription {
+  id           String    @id @default(cuid())
+  collegeId    String
+  college      College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint     String    @unique @db.Text
+  p256dh       String    @db.Text
+  auth         String    @db.Text
+  userAgent    String?
+  deviceName   String?
+  vapidKeyId   String    @default("default")
+  isActive     Boolean   @default(true)
+  failureCount Int       @default(0)
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([collegeId, userId, isActive])
+  @@map("push_subscriptions")
+}
+
+model PushDelivery {
+  id             String             @id @default(cuid())
+  collegeId      String
+  college        College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  notificationId String             @unique
+  notification   Notification       @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  status         PushDeliveryStatus @default(PENDING)
+  attempts       Int                @default(0)
+  nextAttemptAt  DateTime           @default(now())
+  lastError      String?
+  processedAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([collegeId])
+  @@index([status, nextAttemptAt])
+  @@map("push_deliveries")
+}
+
+// ============================================================
+// Onboarding / invite funnel — "People Admin" on POD
+// ============================================================
+
+model InviteRequest {
+  id          String       @id @default(cuid())
+  collegeId   String
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  email       String
+  name        String?
+  userType    UserType
+  status      InviteStatus @default(PENDING)
+  invitedAt   DateTime?
+  respondedAt DateTime?
+  createdAt   DateTime     @default(now())
+
+  @@index([collegeId])
+  @@map("invite_requests")
+}
+
+// ============================================================
+// Bulk import / export
+// ============================================================
+
+model Import {
+  id            String       @id @default(cuid())
+  collegeId     String
+  college       College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  type          ImportType
+  status        ImportStatus @default(UPLOADED)
+  fileName      String
+  totalRows     Int          @default(0)
+  successRows   Int          @default(0)
+  errorRows     Int          @default(0)
+  columnMapping Json?
+  startedById   String
+  startedBy     User         @relation("ImportStartedBy", fields: [startedById], references: [id])
+  createdAt     DateTime     @default(now())
+  completedAt   DateTime?
+
+  errors ImportError[]
+
+  @@index([collegeId])
+  @@map("imports")
+}
+
+model ImportError {
+  id        String  @id @default(cuid())
+  importId  String
+  import    Import  @relation(fields: [importId], references: [id], onDelete: Cascade)
+  rowNumber Int
+  field     String?
+  errorCode String
+  message   String
+
+  @@index([importId])
+  @@map("import_errors")
+}
+
+// ============================================================
+// Audit log — append-only, with before/after snapshots for sensitive
+// mutations (role changes, eligibility overrides, drive publish/suspend,
+// application decisions, offer changes, exports).
+// ============================================================
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  collegeId    String
+  college      College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  actorId      String?
+  actor        User?    @relation(fields: [actorId], references: [id])
+  action       String
+  resourceType String
+  resourceId   String?
+  before       Json?
+  after        Json?
+  reason       String?
+  createdAt    DateTime @default(now())
+
+  @@index([collegeId])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// External fresher jobs — a curated, TPO-reviewed feed of off-campus
+// entry-level openings sourced from an offline scraper (~/JobTracker,
+// outside this codebase and this database entirely). One-way, read-only
+// ingestion: a periodic script (scripts/sync-external-jobs.ts) reads that
+// scraper's JSON export, runs a conservative fresher/entry-level keyword
+// filter, and creates review candidates here. Nothing in this app ever
+// writes back to the scraper or queries it live — same decoupling
+// philosophy used for the Assessments microservice's SSO handoff.
+// ============================================================
+
+enum ExternalJobReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// A raw candidate posting, deduplicated by (company, sourceJobId) at sync
+// time. Global, not tenant-scoped — like Company, one real-world job
+// posting is the same object regardless of which college's TPO is looking
+// at it. Whether it's visible to a given college's students is entirely
+// decided by that college's own ExternalJobReview row, never by anything
+// here.
+model ExternalJobPosting {
+  id              String   @id @default(cuid())
+  sourceJobId     String
+  company         String
+  title           String
+  location        String?
+  link            String
+  description     String
+  // Which allow-list keyword(s) matched, so a TPO reviewing this can see
+  // *why* it was flagged as fresher-relevant instead of taking it on faith.
+  matchedKeywords String[] @default([])
+  firstSeenAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  reviews ExternalJobReview[]
+
+  @@unique([company, sourceJobId])
+  @@index([firstSeenAt])
+  @@map("external_job_postings")
+}
+
+// Per-college review state. A posting is neither "approved" nor "rejected"
+// on its own — only a specific college's review of it is, so the same
+// posting can be approved at one college and rejected at another. The sync
+// script creates one PENDING row per (college, posting) the first time a
+// posting is seen and passes the filter; it never touches a row that
+// already exists, so a TPO's decision is permanent unless they change it
+// themselves. Only APPROVED rows are ever visible to students.
+model ExternalJobReview {
+  id           String                  @id @default(cuid())
+  collegeId    String
+  college      College                 @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  postingId    String
+  posting      ExternalJobPosting      @relation(fields: [postingId], references: [id], onDelete: Cascade)
+  status       ExternalJobReviewStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   User?                   @relation(fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  createdAt    DateTime                @default(now())
+
+  @@unique([collegeId, postingId])
+  @@index([collegeId, status])
+  @@map("external_job_reviews")
+}
+
+// A one-way, read-only sync target: aggregate skill signal computed from a
+// student's REAL assessment history in ~/placement-erp-assessments (a
+// fully separate app/DB, reached only via SSO everywhere else in this
+// codebase — see components/drives/assessments-panel.tsx's own comment).
+// This is the one place that data crosses over, and only as an aggregate
+// summary keyed by the same user id the two apps already share via the
+// SSO token's `sub` claim — never a live query, never raw per-question
+// answers. Populated by scripts/sync-student-skill-profiles.ts. A profile
+// existing does not by itself mean the signal is meaningful — always check
+// finalizedAttemptCount against MIN_SAMPLE_FOR_SIGNAL
+// (lib/skill-profile/constants.ts) before displaying a percentage; a
+// student who hasn't taken enough real assessments should show "not
+// enough data", never a fabricated or misleadingly precise number.
+model StudentSkillProfile {
+  id                    String   @id @default(cuid())
+  collegeId             String
+  college               College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  studentId             String   @unique
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  finalizedAttemptCount Int
+  avgScorePercent       Float?
+  codingSubmissionCount Int      @default(0)
+  avgCodingPassPercent  Float?
+  syncedAt              DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([collegeId])
+  @@map("student_skill_profiles")
+}
+
+// Audit trail for the platform/Super Admin tier (app/platform). Separate
+// from AuditLog because that model requires a collegeId and an actorId that
+// is a tenant User — neither fits here: a platform admin is not a User, and
+// events like a failed login have no college at all.
+//
+// Deliberately NOT a foreign key to PlatformAdmin, and actorEmail is stored
+// denormalized: deleting an operator account must not erase the record of
+// what that operator did. An audit trail that can be cleaned up by the
+// person being audited is not an audit trail.
+model PlatformAuditLog {
+  id              String   @id @default(cuid())
+  platformAdminId String?
+  actorEmail      String
+  action          String
+  targetType      String?
+  targetId        String?
+  targetLabel     String?
+  metadata        Json?
+  ip              String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([platformAdminId])
+  @@map("platform_audit_logs")
+}

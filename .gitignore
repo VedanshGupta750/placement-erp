@@ -1,0 +1,14 @@
+node_modules/
+.next/
+lib/generated/
+.env
+.env.local
+*.log
+.claude/worktrees/
+tsconfig.tsbuildinfo
+
+# Handover artifacts — generated, not source; kept in the project folder
+# for convenience but never committed (the zip is a snapshot of the repo
+# itself, committing it would be redundant and bloat history).
+*.docx
+placement-erp-for-intern.zip
