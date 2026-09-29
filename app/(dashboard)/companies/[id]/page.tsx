@@ -21,6 +21,7 @@ import { CommunicationTab } from "@/components/companies/communication-tab";
 import { DocumentsTab } from "@/components/companies/documents-tab";
 import { ActivityTab } from "@/components/companies/activity-tab";
 import { NotesTab } from "@/components/companies/notes-tab";
+import { CompanyEligibilityTab } from "@/components/companies/eligibility-tab";
 
 // Company 360 — same architecture as the Event 360 / Student 360 pages:
 // every tab below is a self-contained async server component taking only
@@ -108,6 +109,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
           <TabsTrigger value="recruiters">Recruiters</TabsTrigger>
           <TabsTrigger value="drives">Drives</TabsTrigger>
           <TabsTrigger value="applications">Applications</TabsTrigger>
+          <TabsTrigger value="eligibility">Eligibility</TabsTrigger>
           <TabsTrigger value="interviews">Interviews</TabsTrigger>
           <TabsTrigger value="offers">Offers</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
@@ -122,6 +124,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
         <TabsContent value="recruiters" className="mt-4"><RecruitersTab companyId={company.id} /></TabsContent>
         <TabsContent value="drives" className="mt-4"><DrivesTab companyId={company.id} /></TabsContent>
         <TabsContent value="applications" className="mt-4"><ApplicationsTab companyId={company.id} /></TabsContent>
+        <TabsContent value="eligibility" className="mt-4"><CompanyEligibilityTab companyId={company.id} /></TabsContent>
         <TabsContent value="interviews" className="mt-4"><InterviewsTab companyId={company.id} /></TabsContent>
         <TabsContent value="offers" className="mt-4"><OffersTab companyId={company.id} /></TabsContent>
         <TabsContent value="events" className="mt-4"><EventsTab companyId={company.id} /></TabsContent>

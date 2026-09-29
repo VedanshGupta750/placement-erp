@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { prisma } from "@/lib/db";
 import { provisionCollege } from "@/lib/provisioning";
+import { buildDemoResume } from "./seed-pdf";
 import { hashPassword } from "@/lib/auth/password";
 import { computeMatchScore } from "@/lib/matching";
 import { evaluateEligibility, DEFAULT_ELIGIBILITY_LOGIC } from "@/lib/eligibility";
@@ -135,7 +136,31 @@ async function main() {
         skills: { create: studentSkills.map((s) => ({ skillId: s.id })) },
       },
     });
-    await prisma.resume.create({ data: { collegeId, studentId: student.id, name: `${first} ${last} Resume`, isDefault: true, isValid: true } });
+    // A real File row behind every seeded resume, so the TPO-facing
+    // download link works in a demo instead of showing the "uploaded before
+    // file download was wired up" fallback on every single application.
+    const resumeDataUri = buildDemoResume(`${first} ${last}`, course.specialization ?? course.name, student.enrollmentNumber);
+    const resumeFile = await prisma.file.create({
+      data: {
+        collegeId,
+        storageKey: `seed/resume-${student.id}.pdf`,
+        dataUrl: resumeDataUri,
+        originalName: `${first}-${last}-Resume.pdf`,
+        mimeType: "application/pdf",
+        sizeBytes: Buffer.byteLength(resumeDataUri.split(",")[1] ?? "", "base64"),
+        uploadedById: student.userId,
+      },
+    });
+    await prisma.resume.create({
+      data: {
+        collegeId,
+        studentId: student.id,
+        name: `${first} ${last} Resume`,
+        fileId: resumeFile.id,
+        isDefault: true,
+        isValid: true,
+      },
+    });
     await prisma.studentExperience.create({
       data: {
         studentId: student.id,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FileText } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
@@ -14,6 +15,12 @@ export type ApplicationRow = {
   studentId: string;
   courseLabel: string;
   liveBacklogs: number;
+  cgpa: number | null;
+  /** Company this student already holds a placing offer from, if any. */
+  placedAtCompany: string | null;
+  /** Resume snapshot attached at apply time, when it has a downloadable file. */
+  resumeUrl: string | null;
+  resumeFileName: string | null;
   driveTitle: string;
   driveId: string;
   companyName: string;
@@ -55,6 +62,8 @@ export function ApplicationsTable({ rows }: { rows: ApplicationRow[] }) {
               <TableHead>Enrollment No.</TableHead>
               <TableHead>Student</TableHead>
               <TableHead>Course</TableHead>
+              <TableHead>Resume</TableHead>
+              <TableHead>CGPA</TableHead>
               <TableHead>Backlogs</TableHead>
               <TableHead>Drive</TableHead>
               <TableHead>Match</TableHead>
@@ -74,8 +83,30 @@ export function ApplicationsTable({ rows }: { rows: ApplicationRow[] }) {
                   <div className="text-muted-foreground text-xs">
                     <Link href={`/students/${a.studentId}`} className="hover:underline">View profile</Link>
                   </div>
+                  {a.placedAtCompany && (
+                    <span
+                      className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                      title="Already holds an accepted/joined offer — applying elsewhere may breach placement policy"
+                    >
+                      Placed · {a.placedAtCompany}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="text-sm">{a.courseLabel}</TableCell>
+                <TableCell>
+                  {a.resumeUrl ? (
+                    <a
+                      href={a.resumeUrl}
+                      download={a.resumeFileName ?? `${a.enrollmentNumber}.pdf`}
+                      className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
+                    >
+                      <FileText className="size-3.5" /> Open
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="tabular-nums">{a.cgpa ?? "—"}</TableCell>
                 <TableCell className="tabular-nums">{a.liveBacklogs}</TableCell>
                 <TableCell>
                   <Link href={`/drives/${a.driveId}`} className="hover:underline">{a.driveTitle}</Link>

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2, UserCheck, UserX } from "lucide-react";
+import { Trash2, UserCheck, UserX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,7 @@ export function EligibilityOverridesPanel({
   const [pending, setPending] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<StudentHit[]>([]);
-  const [selected, setSelected] = useState<StudentHit | null>(null);
+  const [selected, setSelected] = useState<StudentHit[]>([]);
   const [decision, setDecision] = useState<"ELIGIBLE" | "NOT_ELIGIBLE">("ELIGIBLE");
   const [reason, setReason] = useState("");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,7 +48,6 @@ export function EligibilityOverridesPanel({
   // is driven entirely by user input, so there is no external state to sync.
   function handleQueryChange(value: string) {
     setQuery(value);
-    setSelected(null);
     if (debounce.current) clearTimeout(debounce.current);
     if (value.trim().length < 2) {
       setHits([]);
@@ -63,18 +62,25 @@ export function EligibilityOverridesPanel({
   }
 
   function pick(student: StudentHit) {
-    setSelected(student);
-    setQuery(`${student.name} (${student.enrollmentNumber})`);
+    // Clearing the box rather than writing the name into it: the field is a
+    // search input, not a display of the selection. Typing a second name on
+    // top of a first was the obvious trap in the single-select version.
+    setSelected((prev) => (prev.some((p) => p.id === student.id) ? prev : [...prev, student]));
+    setQuery("");
     setHits([]);
   }
 
+  function unpick(id: string) {
+    setSelected((prev) => prev.filter((p) => p.id !== id));
+  }
+
   async function handleAdd() {
-    if (!selected || reason.trim().length < 3) return;
+    if (selected.length === 0 || reason.trim().length < 3) return;
     setPending(true);
     const res = await fetch(`/api/drives/${driveId}/eligibility/overrides`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId: selected.id, decision, reason: reason.trim() }),
+      body: JSON.stringify({ studentIds: selected.map((s) => s.id), decision, reason: reason.trim() }),
     });
     const data = await res.json().catch(() => ({}));
     setPending(false);
@@ -83,8 +89,10 @@ export function EligibilityOverridesPanel({
       toast.error(data.message ?? "Couldn't save the override.");
       return;
     }
-    toast.success("Override saved. Re-publish the rule to apply it to the frozen results.");
-    setSelected(null);
+    toast.success(
+      `${data.count ?? selected.length} override${(data.count ?? selected.length) === 1 ? "" : "s"} saved. Re-publish the rule to apply them to the frozen results.`,
+    );
+    setSelected([]);
     setQuery("");
     setReason("");
     setHits([]);
@@ -123,9 +131,36 @@ export function EligibilityOverridesPanel({
                 id="override-student"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                placeholder="Search by name or enrollment number"
+                placeholder="Search by name or enrollment number — pick as many as you need"
                 autoComplete="off"
               />
+              {selected.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selected.map((s) => (
+                    <span
+                      key={s.id}
+                      className="bg-accent flex items-center gap-1 rounded-full py-0.5 pr-1 pl-2.5 text-xs"
+                    >
+                      {s.name} <span className="text-muted-foreground">{s.enrollmentNumber}</span>
+                      <button
+                        type="button"
+                        onClick={() => unpick(s.id)}
+                        className="hover:bg-background rounded-full p-0.5"
+                        aria-label={`Remove ${s.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelected([])}
+                    className="text-muted-foreground hover:text-foreground text-xs underline"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              )}
               {hits.length > 0 && (
                 <ul className="bg-popover absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border shadow-md">
                   {hits.map((s) => (
@@ -182,10 +217,14 @@ export function EligibilityOverridesPanel({
               type="button"
               size="sm"
               className="w-fit"
-              disabled={pending || !selected || reason.trim().length < 3}
+              disabled={pending || selected.length === 0 || reason.trim().length < 3}
               onClick={handleAdd}
             >
-              {pending ? "Saving…" : "Add override"}
+              {pending
+                ? "Saving…"
+                : selected.length > 1
+                  ? `Add ${selected.length} overrides`
+                  : "Add override"}
             </Button>
           </div>
         )}

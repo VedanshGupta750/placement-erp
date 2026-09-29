@@ -50,27 +50,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // outside it would be stored and then silently ignored at preview and
   // publish, so refuse it here with a reason the TPO can act on instead.
   const { students } = await getCandidatePopulation(db, driveId);
-  if (!students.some((s) => s.id === parsed.data.studentId)) {
+  const inPopulation = new Set(students.map((s) => s.id));
+  const rejected = parsed.data.studentIds.filter((id) => !inPopulation.has(id));
+
+  // All-or-nothing: a partial success would leave the TPO guessing which of
+  // the six they picked actually took effect.
+  if (rejected.length > 0) {
+    const names = await db.student.findMany({
+      where: { id: { in: rejected } },
+      select: { enrollmentNumber: true, user: { select: { name: true } } },
+    });
+    const label = names.map((n) => `${n.user.name} (${n.enrollmentNumber})`).join(", ") || `${rejected.length} student(s)`;
     return NextResponse.json(
       {
         error: "not_in_population",
-        message:
-          "This student isn't in the drive's candidate pool (batch, eligible course and placement access). Add their course to the drive instead of overriding.",
+        message: `Not in this drive's candidate pool (batch, eligible course and placement access): ${label}. Add their course to the drive instead of overriding.`,
       },
       { status: 400 },
     );
   }
 
-  const override = await db.eligibilityOverride.create({
-    data: {
+  const created = await db.eligibilityOverride.createMany({
+    data: parsed.data.studentIds.map((studentId) => ({
       collegeId: session.collegeId,
       driveId,
-      studentId: parsed.data.studentId,
+      studentId,
       decision: parsed.data.decision,
       reason: parsed.data.reason,
       createdById: session.userId,
-    },
+    })),
   });
 
-  return NextResponse.json({ ok: true, id: override.id });
+  return NextResponse.json({ ok: true, count: created.count });
 }

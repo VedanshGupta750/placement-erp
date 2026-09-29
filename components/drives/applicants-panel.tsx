@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Download, FileText } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ type Applicant = {
   matchScore: number | null;
   student: { enrollmentNumber: string; user: { name: string } };
   fieldValues?: { value: string; field: { label: string } }[];
+  resume?: { name: string; file: { dataUrl: string | null; originalName: string } | null } | null;
 };
 
 const NEXT_ACTIONS: Record<string, { action: string; label: string; variant?: "default" | "outline" | "ghost" }[]> = {
@@ -49,8 +51,22 @@ export function ApplicantsPanel({ driveId, applicants }: { driveId: string; appl
     return <p className="text-muted-foreground py-8 text-center text-sm">No applications yet.</p>;
   }
 
+  const withResume = applicants.filter((a) => a.resume?.file?.dataUrl).length;
+
   return (
-    <div className="flex flex-col divide-y">
+    <div className="flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
+        <p className="text-muted-foreground text-sm">
+          {applicants.length} applicant{applicants.length === 1 ? "" : "s"} · {withResume} with a downloadable resume
+        </p>
+        {withResume > 0 && (
+          <Button variant="outline" size="sm" render={<a href={`/api/drives/${driveId}/resumes`} />}>
+            <Download className="size-3.5" /> Download all resumes
+          </Button>
+        )}
+      </div>
+
+      <div className="flex flex-col divide-y">
       {applicants.map((a) => (
         <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
           <div>
@@ -66,6 +82,21 @@ export function ApplicantsPanel({ driveId, applicants }: { driveId: string; appl
                 {a.fieldValues.map((v) => `${v.field.label}: ${v.value}`).join(" · ")}
               </div>
             )}
+            <div className="mt-1 text-xs">
+              {a.resume?.file?.dataUrl ? (
+                <a
+                  href={a.resume.file.dataUrl}
+                  download={a.resume.file.originalName || `${a.student.enrollmentNumber}.pdf`}
+                  className="text-primary inline-flex items-center gap-1 hover:underline"
+                >
+                  <FileText className="size-3" /> Resume
+                </a>
+              ) : (
+                <span className="text-muted-foreground inline-flex items-center gap-1">
+                  <FileText className="size-3" /> No resume file
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <StatusBadge status={a.status} />
@@ -83,6 +114,7 @@ export function ApplicantsPanel({ driveId, applicants }: { driveId: string; appl
           </div>
         </div>
       ))}
+      </div>
     </div>
   );
 }

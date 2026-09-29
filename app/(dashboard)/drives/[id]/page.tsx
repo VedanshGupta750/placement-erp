@@ -26,6 +26,7 @@ import { DriveHealthCard } from "@/components/drives/drive-health-card";
 import { ShortlistingPanel } from "@/components/drives/shortlisting-panel";
 import { AssessmentsPanel } from "@/components/drives/assessments-panel";
 import { hasPermission } from "@/lib/rbac/guard";
+import { PLACED_OFFER_STATUSES } from "@/lib/students/placement";
 import { describeCondition, type EligibilityCheck, type EligibilityField, type EligibilityOperator } from "@/lib/eligibility";
 import { getActiveOverrides } from "@/lib/eligibility-runner";
 import { EligibilityResultsPanel } from "@/components/drives/eligibility-results-panel";
@@ -86,11 +87,18 @@ export default async function DriveDetailPage({
     where: { id },
     include: {
       company: true,
+      batch: { select: { year: true } },
       positions: true,
       eligibleCourses: { include: { course: true } },
       requiredSkills: { include: { skill: true } },
       applications: {
-        include: { student: { include: { user: true } }, fieldValues: { include: { field: true } } },
+        include: {
+          student: { include: { user: true } },
+          fieldValues: { include: { field: true } },
+          // Resume snapshot taken at apply time — surfaced straight in the
+          // applicants list so screening doesn't need one page per candidate.
+          resume: { select: { name: true, file: { select: { dataUrl: true, originalName: true } } } },
+        },
         orderBy: { matchScore: "desc" },
       },
       offers: { include: { student: { include: { user: true } } } },
@@ -129,7 +137,7 @@ export default async function DriveDetailPage({
   const snapshotResults = latestSnapshot
     ? await db.eligibilityResult.findMany({
         where: { snapshotId: latestSnapshot.id },
-        include: { student: { select: { id: true, enrollmentNumber: true, user: { select: { name: true } }, course: { select: { name: true } } } } },
+        include: { student: { select: { id: true, enrollmentNumber: true, aggregate: true, liveBacklogs: true, user: { select: { name: true, email: true } }, course: { select: { name: true } }, department: { select: { name: true } } } } },
       })
     : [];
   // An override takes effect the moment it is saved, not at the next
@@ -137,6 +145,24 @@ export default async function DriveDetailPage({
   // and the override is layered on top for the verdict actually shown. That
   // is the same order lib/eligibility-runner.ts applies them in, so this
   // roster and the next publish agree.
+  // Who has already filled this drive's form, and who is already placed
+  // elsewhere. Both are joined onto the eligibility roster so the single
+  // "registration is open — who do I still need to chase?" question can be
+  // answered in one place, instead of cross-referencing three tabs.
+  const appliedStudentIds = new Set(drive.applications.map((a) => a.studentId));
+  const placingOffers = await db.offer.findMany({
+    where: {
+      studentId: { in: snapshotResults.map((r) => r.student.id) },
+      status: { in: [...PLACED_OFFER_STATUSES] },
+    },
+    select: { studentId: true, drive: { select: { company: { select: { name: true } } } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const placedCompanyByStudent = new Map<string, string>();
+  for (const o of placingOffers) {
+    if (!placedCompanyByStudent.has(o.studentId)) placedCompanyByStudent.set(o.studentId, o.drive.company.name);
+  }
+
   const eligibilityResultRows = snapshotResults
     .map((r) => {
       const checks = (r.explanation ?? []) as { field: EligibilityField; operator: EligibilityOperator; expected: unknown; actual: unknown; passed: boolean }[];
@@ -147,6 +173,10 @@ export default async function DriveDetailPage({
         name: r.student.user.name,
         enrollmentNumber: r.student.enrollmentNumber,
         courseName: r.student.course?.name ?? null,
+        departmentName: r.student.department?.name ?? null,
+        email: r.student.user.email,
+        cgpa: r.student.aggregate,
+        liveBacklogs: r.student.liveBacklogs,
         eligible: override ? override.decision === "ELIGIBLE" : r.eligible,
         ruleEligible: r.eligible,
         // describeCondition ends with "(passed)"/"(failed)" for log output;
@@ -154,6 +184,8 @@ export default async function DriveDetailPage({
         failedReason: firstFailed ? describeCondition(firstFailed as EligibilityCheck).replace(/\s*\((passed|failed)\)$/, "") : null,
         overridden: Boolean(override),
         overrideReason: override?.reason ?? null,
+        hasApplied: appliedStudentIds.has(r.student.id),
+        placedAtCompany: placedCompanyByStudent.get(r.student.id) ?? null,
       };
     })
     .sort((a, b) => Number(a.eligible) - Number(b.eligible) || a.name.localeCompare(b.name));
@@ -180,7 +212,9 @@ export default async function DriveDetailPage({
             <h1 className="text-2xl font-semibold tracking-tight">{drive.title}</h1>
             <StatusBadge status={drive.status} />
           </div>
-          <p className="text-muted-foreground text-sm">{drive.company.name} · {position?.positionType.replaceAll("_", " ")}</p>
+          <p className="text-muted-foreground text-sm">
+            {drive.company.name} · {position?.positionType.replaceAll("_", " ")} · Batch {drive.batch.year}
+          </p>
         </div>
         <DriveActions id={drive.id} status={drive.status} />
       </div>

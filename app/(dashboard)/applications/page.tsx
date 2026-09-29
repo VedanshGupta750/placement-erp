@@ -16,6 +16,7 @@ import { ApplicationsOverviewChart } from "@/components/applications/application
 import { DriveWisePanel } from "@/components/applications/drive-wise-panel";
 import { AddApplicationDialog } from "@/components/applications/add-application-dialog";
 import { getApplicationListStats, getDriveWiseApplicationCounts, getApplicationFunnel } from "@/lib/applications/stats";
+import { placedStudentWhere, notPlacedStudentWhere, PLACED_OFFER_STATUSES } from "@/lib/students/placement";
 import { ApplicationFunnel } from "@/components/applications/application-funnel";
 import { ApplicationFlagsPanel } from "@/components/applications/application-flags-panel";
 import { getApplicationFlags } from "@/lib/applications/flags";
@@ -25,6 +26,7 @@ const WITHDRAWABLE = new Set(["REGISTERED", "APPLIED", "COLLEGE_APPROVED", "SCRE
 type SearchParams = {
   q?: string;
   driveId?: string;
+  companyId?: string;
   status?: string;
   departmentId?: string;
   courseId?: string;
@@ -32,6 +34,12 @@ type SearchParams = {
   appliedTo?: string;
   minBacklogs?: string;
   maxBacklogs?: string;
+  minCgpa?: string;
+  maxCgpa?: string;
+  minTenth?: string;
+  minTwelfth?: string;
+  placement?: string;
+  excludePlaced?: string;
   priority?: string;
   hasOffer?: string;
   tab?: string;
@@ -89,6 +97,32 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
         ...(params.appliedTo ? { lte: new Date(`${params.appliedTo}T23:59:59`) } : {}),
       };
     }
+    if (params.companyId) where.drive = { ...(where.drive as object), companyId: params.companyId };
+    if (params.minCgpa || params.maxCgpa) {
+      where.student = {
+        ...(where.student as object),
+        aggregate: {
+          ...(params.minCgpa ? { gte: Number(params.minCgpa) } : {}),
+          ...(params.maxCgpa ? { lte: Number(params.maxCgpa) } : {}),
+        },
+      };
+    }
+    if (params.minTenth) {
+      where.student = { ...(where.student as object), tenthScore: { gte: Number(params.minTenth) } };
+    }
+    if (params.minTwelfth) {
+      where.student = { ...(where.student as object), twelfthScore: { gte: Number(params.minTwelfth) } };
+    }
+    // "Placed" is always derived from a placing offer, never read from
+    // Student.placementStatus — see lib/students/placement.ts for why that
+    // column can't be trusted on its own. `excludePlaced` is the explicit
+    // one-click version of placement=unplaced, kept separate so a TPO can
+    // switch it on without losing whatever placement filter they'd set.
+    if (params.placement === "placed") {
+      where.student = { ...(where.student as object), ...placedStudentWhere };
+    } else if (params.placement === "unplaced" || params.excludePlaced === "1") {
+      where.student = { ...(where.student as object), ...notPlacedStudentWhere };
+    }
     if (params.priority) where.priority = params.priority;
     if (params.hasOffer === "1") where.offer = { isNot: null };
 
@@ -98,10 +132,10 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
     const activeBatchId = await getActiveBatchId();
     if (activeBatchId) where.student = { ...(where.student as object), batchId: activeBatchId };
 
-    const [applications, stats, driveWise, funnel, flags, drives, departments, courses] = await Promise.all([
+    const [applications, stats, driveWise, funnel, flags, drives, departments, courses, companies] = await Promise.all([
       db.application.findMany({
         where,
-        include: { student: { include: { user: true, course: true } }, drive: { include: { company: true } }, position: true },
+        include: { student: { include: { user: true, course: true } }, drive: { include: { company: true } }, position: true, resume: { select: { file: { select: { dataUrl: true, originalName: true } } } } },
         orderBy: { appliedAt: "desc" },
         take: 200,
       }),
@@ -112,6 +146,9 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
       db.drive.findMany({ where: activeBatchId ? { batchId: activeBatchId } : {}, select: { id: true, title: true, company: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       db.department.findMany({ orderBy: { name: "asc" } }),
       db.course.findMany({ orderBy: { name: "asc" } }),
+      // Companies that actually run drives for this college — a flat
+      // company list would offer options that can never match anything.
+      db.collegePartnership.findMany({ select: { company: { select: { id: true, name: true } } }, orderBy: { company: { name: "asc" } } }),
     ]);
 
     const activeFilterCount = Object.values(params).filter(Boolean).length;
@@ -126,6 +163,24 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
       return qs ? `/applications?${qs}` : "/applications";
     }
 
+    // Which of these applicants already hold a placing offer, and where.
+    // Surfaced as a badge rather than silently filtered out: a placed
+    // student applying elsewhere is usually a policy question the TPO wants
+    // to SEE, not one the list should quietly hide. The explicit
+    // "Exclude already-placed" filter is there for when they do want it gone.
+    const placingOffers = await db.offer.findMany({
+      where: {
+        studentId: { in: applications.map((a) => a.studentId) },
+        status: { in: [...PLACED_OFFER_STATUSES] },
+      },
+      select: { studentId: true, drive: { select: { company: { select: { name: true } } } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const placedCompanyByStudent = new Map<string, string>();
+    for (const o of placingOffers) {
+      if (!placedCompanyByStudent.has(o.studentId)) placedCompanyByStudent.set(o.studentId, o.drive.company.name);
+    }
+
     const rows: ApplicationRow[] = applications.map((a) => ({
       id: a.id,
       enrollmentNumber: a.student.enrollmentNumber,
@@ -133,6 +188,10 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
       studentId: a.studentId,
       courseLabel: a.student.course.specialization ?? a.student.course.name,
       liveBacklogs: a.student.liveBacklogs,
+      cgpa: a.student.aggregate,
+      resumeUrl: a.resume?.file?.dataUrl ?? null,
+      resumeFileName: a.resume?.file?.originalName ?? null,
+      placedAtCompany: placedCompanyByStudent.get(a.studentId) ?? null,
       driveTitle: a.drive.title,
       driveId: a.driveId,
       companyName: a.drive.company.name,
@@ -199,6 +258,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
                 drives={drives.map((d) => ({ id: d.id, title: d.title, companyName: d.company.name }))}
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
                 courses={courses.map((c) => ({ id: c.id, name: c.name, specialization: c.specialization }))}
+                companies={companies.map((p) => ({ id: p.company.id, name: p.company.name }))}
               />
               <ApplicationsSavedViewsDropdown />
             </div>
