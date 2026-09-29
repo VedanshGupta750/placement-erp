@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
+import { getActiveBatchId } from "@/lib/batch-context";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { createDriveSchema } from "@/lib/validators/drive";
 
@@ -54,7 +55,18 @@ export async function POST(request: Request) {
 
   const [department, batch] = await Promise.all([
     db.department.findFirstOrThrow({ select: { id: true } }),
-    db.batch.findFirstOrThrow({ orderBy: { year: "desc" }, select: { id: true } }),
+    // Explicit batch first, then whatever cohort the user is working in
+    // (the header switcher), and only then the newest year. Defaulting
+    // straight to "newest" silently pointed every new drive at the most
+    // recent batch — harmless with one batch, wrong the moment a second
+    // exists, because eligibility resolves candidates by drive.batchId.
+    data.batchId
+      ? db.batch.findFirstOrThrow({ where: { id: data.batchId }, select: { id: true } })
+      : (await getActiveBatchId().then((id) =>
+          id
+            ? db.batch.findFirst({ where: { id }, select: { id: true } })
+            : null,
+        )) ?? db.batch.findFirstOrThrow({ orderBy: { year: "desc" }, select: { id: true } }),
   ]);
   const company = await db.company.upsert({
     where: { name: data.companyName },

@@ -37,6 +37,8 @@ export function AddStudentDialog({ courses, batches, departments }: { courses: C
         batchId,
         departmentId: departmentId || undefined,
         aggregate: fd.get("aggregate") ? Number(fd.get("aggregate")) : undefined,
+        tenthScore: fd.get("tenthScore") ? Number(fd.get("tenthScore")) : undefined,
+        twelfthScore: fd.get("twelfthScore") ? Number(fd.get("twelfthScore")) : undefined,
       }),
     });
     setPending(false);
@@ -56,7 +58,7 @@ export function AddStudentDialog({ courses, batches, departments }: { courses: C
       <DialogTrigger render={<Button size="sm" />}>
         <UserPlus className="size-4" /> Add Student
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[90dvh] w-full overflow-y-auto sm:max-w-md">
         <DialogHeader><DialogTitle>Add a student</DialogTitle></DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
@@ -77,10 +79,24 @@ export function AddStudentDialog({ courses, batches, departments }: { courses: C
               <Input id="aggregate" name="aggregate" type="number" step="0.01" min={0} max={10} />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="tenthScore">10th %</Label>
+              <Input id="tenthScore" name="tenthScore" type="number" step="0.01" min={0} max={100} placeholder="Optional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="twelfthScore">12th %</Label>
+              <Input id="twelfthScore" name="twelfthScore" type="number" step="0.01" min={0} max={100} placeholder="Optional" />
+            </div>
+          </div>
           <div className="flex flex-col gap-1.5">
             <Label>Course</Label>
             <Select value={courseId} onValueChange={(v) => v && setCourseId(v)}>
-              <SelectTrigger><SelectValue placeholder="Select a course" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a course">
+                  {(v: string) => courses.find((c) => c.id === v)?.specialization ?? courses.find((c) => c.id === v)?.name ?? "Select a course"}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 {courses.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.specialization ?? c.name}</SelectItem>
@@ -92,7 +108,11 @@ export function AddStudentDialog({ courses, batches, departments }: { courses: C
             <div className="flex flex-col gap-1.5">
               <Label>Batch</Label>
               <Select value={batchId} onValueChange={(v) => v && setBatchId(v)}>
-                <SelectTrigger><SelectValue placeholder="Select a batch" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a batch">
+                    {(v: string) => batches.find((b) => b.id === v)?.year?.toString() ?? "Select a batch"}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {batches.map((b) => (
                     <SelectItem key={b.id} value={b.id}>{b.year}</SelectItem>
@@ -103,7 +123,11 @@ export function AddStudentDialog({ courses, batches, departments }: { courses: C
             <div className="flex flex-col gap-1.5">
               <Label>Department</Label>
               <Select value={departmentId} onValueChange={(v) => v && setDepartmentId(v)}>
-                <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Optional">
+                    {(v: string) => departments.find((d) => d.id === v)?.name ?? "Optional"}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>

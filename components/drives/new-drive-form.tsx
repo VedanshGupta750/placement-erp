@@ -60,17 +60,24 @@ export function NewDriveForm({
   skills,
   initialCompanyName,
   initialPositionType,
+  batches,
+  defaultBatchId,
 }: {
   courses: { id: string; name: string; specialization: string | null }[];
   skills: { id: string; name: string }[];
   initialCompanyName?: string;
   initialPositionType?: string;
+  batches: { id: string; year: number }[];
+  defaultBatchId: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [eligibleCount, setEligibleCount] = useState<number | null>(null);
+  // Which graduating cohort this drive hires from. Defaults to the batch the
+  // user is currently working in, not simply the newest year.
+  const [batchId, setBatchId] = useState(defaultBatchId);
   const [form, setForm] = useState<FormState>({
     ...INITIAL_STATE,
     companyName: initialCompanyName ?? "",
@@ -150,6 +157,7 @@ export function NewDriveForm({
       otherDetails: form.otherDetails || undefined,
       courseIds: form.courseIds,
       skillIds: form.skillIds,
+      batchId,
     };
 
     const res = await fetch("/api/drives", {
@@ -212,6 +220,25 @@ export function NewDriveForm({
               <Label htmlFor="companyName">Organisation *</Label>
               <Input id="companyName" value={form.companyName} onChange={(e) => set("companyName", e.target.value)} placeholder="Company name" required />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Batch (graduating year) *</Label>
+              <Select value={batchId} onValueChange={(v) => v && setBatchId(v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a batch">
+                    {(v: string) => batches.find((b) => b.id === v)?.year?.toString() ?? "Select a batch"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {batches.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>{b.year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground -mt-1 text-xs">
+                Only students in this batch are considered for eligibility.
+              </p>
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <Label>Drive type</Label>
               <Select value={form.positionType} onValueChange={(v) => v && set("positionType", v)}>

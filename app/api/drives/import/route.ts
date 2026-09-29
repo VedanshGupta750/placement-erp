@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
+import { getActiveBatchId } from "@/lib/batch-context";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { importDriveRowSchema } from "@/lib/validators/import";
 
@@ -33,11 +34,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "validation_error", message: "Import is limited to 1000 rows at a time." }, { status: 400 });
   }
 
-  const [department, batch, courses] = await Promise.all([
+  const [department, batches, courses] = await Promise.all([
     db.department.findFirstOrThrow({ select: { id: true } }),
-    db.batch.findFirstOrThrow({ orderBy: { year: "desc" }, select: { id: true } }),
+    db.batch.findMany({ select: { id: true, year: true } }),
     db.course.findMany({ select: { id: true, name: true, specialization: true } }),
   ]);
+
+  // A drive's batch decides whose eligibility is ever evaluated, so it must
+  // be explicit: the row's own batchYear, else the batch chosen on the
+  // import screen, else the batch the user is working in. Falling through to
+  // "newest year" silently is what made every drive land on one cohort.
+  const activeBatchId = await getActiveBatchId();
+  const selectedBatchId = typeof body?.batchId === "string" ? body.batchId : null;
+  const fallbackBatch =
+    batches.find((b) => b.id === selectedBatchId) ??
+    batches.find((b) => b.id === activeBatchId) ??
+    [...batches].sort((a, b) => b.year - a.year)[0];
+
+  if (!fallbackBatch) {
+    return NextResponse.json(
+      { error: "no_batch", message: "Create a batch in Settings before importing drives." },
+      { status: 400 },
+    );
+  }
 
   const importRecord = await db.import.create({
     data: {
@@ -62,6 +81,16 @@ export async function POST(request: Request) {
       continue;
     }
     const data = parsed.data;
+    const rowBatch = data.batchYear ? batches.find((b) => b.year === data.batchYear) : fallbackBatch;
+    if (!rowBatch) {
+      errors.push({
+        rowNumber,
+        field: "batchYear",
+        errorCode: "UNKNOWN_BATCH",
+        message: `Batch ${data.batchYear} doesn't exist yet — create it in Settings first.`,
+      });
+      continue;
+    }
 
     const wantedNames = data.courseNames.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean);
     const matchedCourseIds = courses
@@ -87,7 +116,7 @@ export async function POST(request: Request) {
       await db.drive.create({
         data: {
           collegeId: session.collegeId,
-          batchId: batch.id,
+          batchId: rowBatch.id,
           departmentId: department.id,
           companyId: company.id,
           createdById: session.userId,

@@ -3,7 +3,10 @@ import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { importStudentRowSchema } from "@/lib/validators/import";
-import { generateTempPassword, hashPassword } from "@/lib/auth/password";
+import { hashPassword } from "@/lib/auth/password";
+import { defaultStudentPassword, defaultPasswordHint } from "@/lib/auth/default-password";
+import { sendPasswordLink } from "@/lib/auth/password-reset";
+import { emailDeliveryConfigured } from "@/lib/email/send";
 
 // Row-by-row import (not a single bulk insert) so one bad row doesn't fail
 // the whole file — every row gets its own validation + duplicate check, and
@@ -33,6 +36,14 @@ export async function POST(request: Request) {
   const studentRole = await db.role.findFirst({ where: { name: "Student" } });
   const department = await db.department.findFirst();
 
+  // Chosen on the import screen; used for any row that leaves batchYear
+  // blank, so a single-cohort sheet needn't repeat the column 800 times.
+  const selectedBatch =
+    typeof body?.batchId === "string"
+      ? await db.batch.findFirst({ where: { id: body.batchId }, select: { id: true } })
+      : null;
+
+  const createdUsers: { id: string; name: string; email: string }[] = [];
   const importRecord = await db.import.create({
     data: {
       collegeId: session.collegeId,
@@ -61,7 +72,7 @@ export async function POST(request: Request) {
       const [existingUser, course, batch] = await Promise.all([
         db.user.findUnique({ where: { email: data.email.toLowerCase().trim() } }),
         db.course.findFirst({ where: { name: data.courseName } }),
-        db.batch.findFirst({ where: { year: data.batchYear } }),
+        data.batchYear ? db.batch.findFirst({ where: { year: data.batchYear } }) : Promise.resolve(selectedBatch),
       ]);
       if (existingUser) {
         errors.push({ rowNumber, field: "email", errorCode: "DUPLICATE_EMAIL", message: "A user with this email already exists." });
@@ -72,7 +83,14 @@ export async function POST(request: Request) {
         continue;
       }
       if (!batch) {
-        errors.push({ rowNumber, field: "batchYear", errorCode: "UNKNOWN_BATCH", message: `Batch ${data.batchYear} doesn't exist yet — create it in Settings first.` });
+        errors.push({
+          rowNumber,
+          field: "batchYear",
+          errorCode: "UNKNOWN_BATCH",
+          message: data.batchYear
+            ? `Batch ${data.batchYear} doesn't exist yet — create it in Settings first.`
+            : "No batch for this row: leave batchYear blank only after choosing a batch above.",
+        });
         continue;
       }
       const existingEnrollment = await db.student.findFirst({ where: { enrollmentNumber: data.enrollmentNumber } });
@@ -81,9 +99,13 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const passwordHash = await hashPassword(generateTempPassword());
+      // A known starter password (the enrollment number by default) plus
+      // mustChangePassword, so the student can sign in without waiting on
+      // email and is forced to replace it immediately. The set-password
+      // email below is still sent when a mail provider is configured.
+      const passwordHash = await hashPassword(defaultStudentPassword(data.enrollmentNumber));
       const user = await db.user.create({
-        data: { collegeId: session.collegeId, email: data.email.toLowerCase().trim(), name: data.name, passwordHash, status: "INVITED", userType: "STUDENT", roleId: studentRole?.id },
+        data: { collegeId: session.collegeId, email: data.email.toLowerCase().trim(), name: data.name, passwordHash, mustChangePassword: true, status: "INVITED", userType: "STUDENT", roleId: studentRole?.id },
       });
       await db.student.create({
         data: {
@@ -98,9 +120,28 @@ export async function POST(request: Request) {
           liveBacklogs: data.liveBacklogs ?? 0,
         },
       });
+      createdUsers.push({ id: user.id, name: data.name, email: data.email.toLowerCase().trim() });
       successRows += 1;
     } catch {
       errors.push({ rowNumber, errorCode: "UNKNOWN", message: "Couldn't create this student." });
+    }
+  }
+
+  // Sent after the loop so a slow mail server never stretches the import
+  // itself, and one failure can't abort the rest of the batch.
+  let invitesSent = 0;
+  for (const created of createdUsers) {
+    try {
+      const result = await sendPasswordLink({
+        userId: created.id,
+        name: created.name,
+        email: created.email,
+        purpose: "SET_PASSWORD",
+        collegeId: session.collegeId,
+      });
+      if (result.delivered) invitesSent += 1;
+    } catch {
+      // Logged by the mailer; the student can still use Forgot password.
     }
   }
 
@@ -115,5 +156,17 @@ export async function POST(request: Request) {
     },
   });
 
-  return NextResponse.json({ ok: true, importId: importRecord.id, successRows, errorRows: errors.length, errors: errors.slice(0, 50) });
+  return NextResponse.json({
+    ok: true,
+    importId: importRecord.id,
+    successRows,
+    errorRows: errors.length,
+    errors: errors.slice(0, 50),
+    invitesSent,
+    // Lets the UI say "emails are not configured — students must use Forgot
+    // password" rather than implying invitations went out when they did not.
+    emailConfigured: emailDeliveryConfigured(),
+    // So the UI can tell the TPO what to pass on when mail isn't wired up.
+    defaultPasswordHint: defaultPasswordHint(),
+  });
 }

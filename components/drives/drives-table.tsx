@@ -14,6 +14,7 @@ import { DrivesBulkActionsBar } from "@/components/drives/drives-bulk-actions-ba
 export type DriveRow = {
   id: string;
   companyName: string;
+  batchYear: number;
   title: string;
   status: string;
   registrationClosesAt: string | null;
@@ -145,6 +146,7 @@ export function DrivesTable({ rows }: { rows: DriveRow[] }) {
                 </TableCell>
                 <TableCell>
                   <Link href={`/drives/${d.id}`} className="font-medium hover:underline">{d.title}</Link>
+                  <div className="text-muted-foreground text-xs">Batch {d.batchYear}</div>
                 </TableCell>
                 <TableCell><StatusBadge status={d.status} /></TableCell>
                 {visible.has("registrationClosesAt") && (

@@ -5,7 +5,8 @@ export const importStudentRowSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
   email: z.string().trim().email("Invalid email"),
   courseName: z.string().trim().min(1, "Course is required"),
-  batchYear: z.coerce.number().int().min(2000).max(2100),
+  // Optional: blank rows fall back to the batch picked on the import screen.
+  batchYear: z.coerce.number().int().min(2000).max(2100).optional(),
   aggregate: z.coerce.number().min(0).max(10).optional(),
   liveBacklogs: z.coerce.number().int().min(0).optional(),
 });
@@ -39,6 +40,8 @@ export type ImportCompanyRow = z.infer<typeof importCompanyRowSchema>;
 export const COMPANY_IMPORT_TEMPLATE_HEADERS = ["name", "industryType", "website", "headquarters", "size", "hiringType"];
 
 export const importDriveRowSchema = z.object({
+  // Optional: falls back to the batch chosen on the import screen.
+  batchYear: z.coerce.number().int().min(2000).max(2100).optional(),
   title: z.string().trim().min(1, "Drive title is required"),
   companyName: z.string().trim().min(1, "Company name is required"),
   courseNames: z.string().trim().min(1, "At least one course name is required"),
@@ -51,7 +54,7 @@ export const importDriveRowSchema = z.object({
 });
 export type ImportDriveRow = z.infer<typeof importDriveRowSchema>;
 
-export const DRIVE_IMPORT_TEMPLATE_HEADERS = ["title", "companyName", "courseNames", "positionType", "employmentType", "minCtc", "maxCtc", "openings", "registrationClosesAt"];
+export const DRIVE_IMPORT_TEMPLATE_HEADERS = ["title", "companyName", "batchYear", "courseNames", "positionType", "employmentType", "minCtc", "maxCtc", "openings", "registrationClosesAt"];
 
 export const importApplicationRowSchema = z.object({
   enrollmentNumber: z.string().trim().min(1, "Enrollment number is required"),

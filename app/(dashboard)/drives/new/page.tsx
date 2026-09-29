@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { NewDriveForm } from "@/components/drives/new-drive-form";
 import { hasPermission } from "@/lib/rbac/guard";
+import { getActiveBatchId } from "@/lib/batch-context";
 
 export default async function NewDrivePage({ searchParams }: { searchParams: Promise<{ companyName?: string; type?: string }> }) {
   const { companyName, type } = await searchParams;
@@ -24,10 +25,17 @@ export default async function NewDrivePage({ searchParams }: { searchParams: Pro
     );
   }
 
-  const [courses, skills] = await Promise.all([
+  const [courses, skills, batches, activeBatchId] = await Promise.all([
     db.course.findMany({ orderBy: { name: "asc" } }),
     db.skill.findMany({ orderBy: { name: "asc" } }),
+    db.batch.findMany({ orderBy: { year: "desc" }, select: { id: true, year: true } }),
+    getActiveBatchId(),
   ]);
+
+  // The cohort the user is working in wins over "newest year" — creating a
+  // drive while viewing the 2026 batch should produce a 2026 drive.
+  const defaultBatchId =
+    (activeBatchId && batches.some((b) => b.id === activeBatchId) ? activeBatchId : null) ?? batches[0]?.id ?? "";
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -38,7 +46,14 @@ export default async function NewDrivePage({ searchParams }: { searchParams: Pro
         <h1 className="text-2xl font-semibold tracking-tight">New placement drive</h1>
         <p className="text-muted-foreground text-sm">Saved as a draft — publish it when you&apos;re ready for students to see it.</p>
       </div>
-      <NewDriveForm courses={courses} skills={skills} initialCompanyName={companyName} initialPositionType={type} />
+      <NewDriveForm
+        courses={courses}
+        skills={skills}
+        initialCompanyName={companyName}
+        initialPositionType={type}
+        batches={batches.map((b) => ({ id: b.id, year: b.year }))}
+        defaultBatchId={defaultBatchId}
+      />
     </div>
   );
 }

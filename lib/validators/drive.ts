@@ -15,6 +15,9 @@ export const createDriveSchema = z.object({
   otherDetails: z.string().optional(),
   contactPersons: z.string().optional(),
   registrationClosesAt: z.string().optional(),
+  // Which graduating cohort this drive hires from. Optional so existing
+  // callers keep working; the route falls back to the active batch.
+  batchId: z.string().optional(),
   courseIds: z.array(z.string()).min(1, "Select at least one eligible course."),
   skillIds: z.array(z.string()).optional(),
 });

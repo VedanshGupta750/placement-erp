@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import { Upload, Download, CheckCircle2, AlertTriangle } from "lucide-react";
@@ -22,13 +24,22 @@ function downloadTemplate() {
   URL.revokeObjectURL(url);
 }
 
-export function ImportForm() {
+export function ImportForm({
+  batches,
+  defaultBatchId,
+}: {
+  batches: { id: string; year: number }[];
+  defaultBatchId: string;
+}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  // Applies to every row that leaves batchYear blank, so a sheet of one
+  // cohort doesn't need the column repeated on all 800 lines.
+  const [batchId, setBatchId] = useState(defaultBatchId);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -47,7 +58,7 @@ export function ImportForm() {
     const res = await fetch("/api/students/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows, fileName }),
+      body: JSON.stringify({ rows, fileName, batchId }),
     });
     const data = await res.json();
     setPending(false);
@@ -63,6 +74,25 @@ export function ImportForm() {
     <Card>
       <CardHeader><CardTitle className="text-base">Import students from CSV</CardTitle></CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <Label>Batch (graduating year)</Label>
+          <Select value={batchId} onValueChange={(v) => v && setBatchId(v)}>
+            <SelectTrigger className="w-full sm:w-56">
+              <SelectValue placeholder="Select a batch">
+                {(v: string) => batches.find((b) => b.id === v)?.year?.toString() ?? "Select a batch"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {batches.map((b) => (
+                <SelectItem key={b.id} value={b.id}>{b.year}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">
+            Used for any row that leaves <code>batchYear</code> blank. A value in the CSV always wins.
+          </p>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="sm" onClick={downloadTemplate}>
             <Download className="size-4" /> Download template

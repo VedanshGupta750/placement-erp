@@ -134,7 +134,7 @@ export default async function DrivesPage({ searchParams }: { searchParams: Promi
   const [driveResults, companies, courses, departments, staff, total, published, registrationOpen, ongoing, completed, offersCount] = await Promise.all([
     db.drive.findMany({
       where,
-      include: { company: true, positions: true, _count: { select: { applications: true, offers: true } } },
+      include: { company: true, batch: { select: { year: true } }, positions: true, _count: { select: { applications: true, offers: true } } },
       orderBy: { createdAt: "desc" },
       take: 500,
     }),
@@ -178,6 +178,7 @@ export default async function DrivesPage({ searchParams }: { searchParams: Promi
     return {
       id: d.id,
       companyName: d.company.name,
+      batchYear: d.batch.year,
       title: d.title,
       status: d.status,
       registrationClosesAt: d.registrationClosesAt ? d.registrationClosesAt.toISOString() : null,

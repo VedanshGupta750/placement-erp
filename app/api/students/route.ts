@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
-import { hashPassword, generateTempPassword } from "@/lib/auth/password";
+import { hashPassword } from "@/lib/auth/password";
+import { defaultStudentPassword, defaultPasswordHint } from "@/lib/auth/default-password";
+import { sendPasswordLink } from "@/lib/auth/password-reset";
+import { emailDeliveryConfigured } from "@/lib/email/send";
 import { z } from "zod";
 
 const createStudentSchema = z.object({
@@ -13,6 +16,8 @@ const createStudentSchema = z.object({
   batchId: z.string().min(1, "Batch is required."),
   departmentId: z.string().optional(),
   aggregate: z.number().min(0).max(10).optional(),
+  tenthScore: z.number().min(0).max(100).optional(),
+  twelfthScore: z.number().min(0).max(100).optional(),
 });
 
 // The single-student counterpart to /api/students/import — same
@@ -46,7 +51,7 @@ export async function POST(request: Request) {
   }
 
   const studentRole = await db.role.findFirst({ where: { name: "Student" } });
-  const passwordHash = await hashPassword(generateTempPassword());
+  const passwordHash = await hashPassword(defaultStudentPassword(data.enrollmentNumber));
 
   const user = await db.user.create({
     data: {
@@ -54,6 +59,7 @@ export async function POST(request: Request) {
       email: data.email.toLowerCase().trim(),
       name: data.name,
       passwordHash,
+      mustChangePassword: true,
       status: "INVITED",
       userType: "STUDENT",
       roleId: studentRole?.id,
@@ -68,10 +74,31 @@ export async function POST(request: Request) {
       batchId: data.batchId,
       courseId: data.courseId,
       enrollmentNumber: data.enrollmentNumber,
+      tenthScore: data.tenthScore,
+      twelfthScore: data.twelfthScore,
       aggregate: data.aggregate,
       aggregateType: "CGPA",
     },
   });
 
-  return NextResponse.json({ ok: true, id: student.id });
+  // Activation is by emailed link, not a password handed over in person —
+  // the generated one above is random and never surfaced.
+  const invite = await sendPasswordLink({
+    userId: user.id,
+    name: data.name,
+    email: data.email.toLowerCase().trim(),
+    purpose: "SET_PASSWORD",
+    collegeId: session.collegeId,
+  }).catch(() => null);
+
+  return NextResponse.json({
+    ok: true,
+    id: student.id,
+    inviteSent: Boolean(invite?.delivered),
+    emailConfigured: emailDeliveryConfigured(),
+    defaultPasswordHint: defaultPasswordHint(),
+    // Only when mail isn't configured: gives the TPO something to pass on
+    // by hand instead of leaving the student with no way in at all.
+    setPasswordUrl: invite && !invite.delivered ? invite.url : undefined,
+  });
 }
