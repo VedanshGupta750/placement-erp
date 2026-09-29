@@ -14,6 +14,7 @@ import { StaffProfileHeader } from "@/components/profile/staff-profile-header";
 import { StaffProfileTabs } from "@/components/profile/staff-profile-tabs";
 import { EditStaffProfileDialog } from "@/components/profile/edit-staff-profile-dialog";
 import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
+import { AcademicChangeRequestPanel } from "@/components/profile/academic-change-request-panel";
 import { PLACED_OFFER_STATUSES, effectivePlacementStatus, PLACEMENT_STATUS_LABELS } from "@/lib/students/placement";
 
 export default async function ProfilePage() {
@@ -72,6 +73,12 @@ export default async function ProfilePage() {
       // Placing offers only — the student's own "Placement status" row is
       // derived from these, never from the stale column.
       offers: { where: { status: { in: [...PLACED_OFFER_STATUSES] } }, select: { id: true }, take: 1 },
+      // The student's own correction requests — raising one never changes
+      // the record above, so both are shown together for the contrast.
+      academicChangeRequests: {
+        orderBy: { createdAt: "desc" },
+        include: { reviewedBy: { select: { name: true } } },
+      },
     },
   });
   const [eventRegistrations, eventAttendances, eventCertificates] = await Promise.all([
@@ -137,8 +144,12 @@ export default async function ProfilePage() {
           </div>
         </div>
         </div>
-        <div className="w-full shrink-0 sm:w-auto [&>button]:w-full sm:[&>button]:w-auto">
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row [&>button]:w-full sm:[&>button]:w-auto">
           <ParseResumeDialog />
+          {/* Students had no way to change their own password: the dialog was
+              mounted only in the staff branch above, even though
+              /api/profile/change-password has always accepted any session. */}
+          <ChangePasswordDialog />
         </div>
       </div>
 
@@ -163,6 +174,26 @@ export default async function ProfilePage() {
             <div>
               <div className="text-muted-foreground">Live backlogs</div>
               <div className="font-medium">{student.liveBacklogs}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Dead backlogs</div>
+              <div className="font-medium">{student.closedBacklogs}</div>
+            </div>
+            <div className="col-span-2 border-t pt-3">
+              <AcademicChangeRequestPanel
+                requests={student.academicChangeRequests.map((r) => ({
+                  id: r.id,
+                  field: r.field,
+                  currentValue: r.currentValue,
+                  requestedValue: r.requestedValue,
+                  reason: r.reason,
+                  status: r.status,
+                  reviewNote: r.reviewNote,
+                  reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+                  reviewedByName: r.reviewedBy?.name ?? null,
+                  createdAt: r.createdAt.toISOString(),
+                }))}
+              />
             </div>
           </CardContent>
         </Card>

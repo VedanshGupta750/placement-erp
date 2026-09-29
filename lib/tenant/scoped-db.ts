@@ -22,6 +22,7 @@ const TENANT_MODELS = new Set([
   "EligibilitySnapshot",
   "EligibilityResult",
   "EligibilityOverride",
+  "AcademicChangeRequest",
   "Application",
   "ApplicationStatusHistory",
   "SelectionRound",

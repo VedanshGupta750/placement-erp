@@ -3,16 +3,24 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { hasPermission } from "@/lib/rbac/guard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AcademicDetailClient } from "@/components/students/academic-detail-client";
+import { AcademicRequestsPanel } from "@/components/students/academic-requests-panel";
+import { BoardScoresEditor } from "@/components/students/board-scores-editor";
 
 export async function AcademicTab({ studentId, canViewSensitive }: { studentId: string; canViewSensitive: boolean }) {
   const session = await requireSession();
   const db = getTenantDb(session.collegeId);
 
-  const [student, backlogs, semesterResults, canEdit] = await Promise.all([
+  const [student, backlogs, semesterResults, canEdit, canViewSensitivePerm, academicRequests] = await Promise.all([
     db.student.findUniqueOrThrow({ where: { id: studentId } }),
     db.studentBacklog.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
     db.studentSemesterResult.findMany({ where: { studentId } }),
     hasPermission(session, "student.edit"),
+    hasPermission(session, "student.view_sensitive"),
+    db.academicChangeRequest.findMany({
+      where: { studentId },
+      orderBy: { createdAt: "desc" },
+      include: { reviewedBy: { select: { name: true } } },
+    }),
   ]);
 
   if (!canViewSensitive) {
@@ -25,10 +33,60 @@ export async function AcademicTab({ studentId, canViewSensitive }: { studentId: 
     );
   }
 
+  const pendingRequestCount = academicRequests.filter((r: { status: string }) => r.status === "PENDING").length;
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader><CardTitle className="text-base">Board & Diploma Scores</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Change requests
+            {pendingRequestCount > 0 && (
+              <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                {pendingRequestCount} pending
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AcademicRequestsPanel
+            studentId={studentId}
+            canReview={canEdit && canViewSensitivePerm}
+            requests={academicRequests.map((r: {
+              id: string; field: string; currentValue: number | null; requestedValue: number;
+              reason: string; status: string; reviewNote: string | null; reviewedAt: Date | null;
+              createdAt: Date; reviewedBy: { name: string } | null;
+            }) => ({
+              id: r.id,
+              field: r.field,
+              currentValue: r.currentValue,
+              requestedValue: r.requestedValue,
+              reason: r.reason,
+              status: r.status,
+              reviewNote: r.reviewNote,
+              reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+              reviewedByName: r.reviewedBy?.name ?? null,
+              createdAt: r.createdAt.toISOString(),
+            }))}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">Board &amp; Diploma Scores</CardTitle>
+          {canEdit && canViewSensitivePerm && (
+            <BoardScoresEditor
+              studentId={studentId}
+              scores={{
+                tenthScore: student.tenthScore,
+                twelfthScore: student.twelfthScore,
+                diplomaScore: student.diplomaScore,
+                aggregate: student.aggregate,
+              }}
+            />
+          )}
+        </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <ScoreItem label="10th" value={student.tenthScore} type={student.tenthScoreType} />
           <ScoreItem label="12th" value={student.twelfthScore} type={student.twelfthScoreType} />

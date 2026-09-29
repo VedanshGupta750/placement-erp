@@ -1,6 +1,8 @@
 // Human-readable label for an audit action. Shared by the per-conversation
 // Activity tab and the /audit admin log so the two surfaces never drift.
 export const AUDIT_LABELS: Record<string, string> = {
+  "student.academic_change_approved": "Academic change approved",
+  "student.academic_change_rejected": "Academic change rejected",
   "auth.login": "Signed in",
   "auth.login_failed": "Failed sign-in attempt",
   "auth.logout": "Signed out",

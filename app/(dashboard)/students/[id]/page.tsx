@@ -28,8 +28,23 @@ import { getStudentScopeWhere } from "@/lib/students/scope";
 // a self-contained async server component taking only `{studentId}` and
 // fetching its own data, so each can be built/changed independently without
 // touching this shared shell.
-export default async function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+const STUDENT_TABS = [
+  "overview", "academic", "eligibility", "placement", "applications", "interviews",
+  "offers", "joining", "documents", "skills", "communication", "notes", "activity",
+] as const;
+
+export default async function StudentDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const { id } = await params;
+  // Lets a notification link straight to the tab it is about — an academic
+  // change request pointed at the Overview tab was effectively invisible.
+  const { tab } = await searchParams;
+  const initialTab = STUDENT_TABS.includes(tab as (typeof STUDENT_TABS)[number]) ? tab! : "overview";
   const session = await requireSession();
   const db = getTenantDb(session.collegeId);
 
@@ -55,7 +70,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   });
   if (!student) notFound();
 
-  const [canEdit, canMessage, canAddToDrive, activeDrives] = await Promise.all([
+  const [canEdit, canMessage, canAddToDrive, activeDrives, pendingAcademicRequests] = await Promise.all([
     hasPermission(session, "student.edit"),
     hasPermission(session, "message.send"),
     hasPermission(session, "application.approve"),
@@ -65,6 +80,10 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    // Surfaced on the tab itself: a request sitting inside the Academic tab
+    // is invisible from the tab strip, which is exactly how the first one
+    // went unnoticed.
+    db.academicChangeRequest.count({ where: { studentId: id, status: "PENDING" } }),
   ]);
 
   const initials = student.user.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("");
@@ -133,10 +152,17 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         />
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={initialTab}>
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="academic">Academic</TabsTrigger>
+          <TabsTrigger value="academic">
+            Academic
+            {pendingAcademicRequests > 0 && (
+              <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white">
+                {pendingAcademicRequests > 9 ? "9+" : pendingAcademicRequests}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="eligibility">Eligibility</TabsTrigger>
           <TabsTrigger value="placement">Placement</TabsTrigger>
           <TabsTrigger value="applications">Applications</TabsTrigger>
