@@ -561,6 +561,10 @@ model User {
   college       College    @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   email         String     @unique
   passwordHash  String
+  // True while the account still has the password the placement cell set.
+  // The dashboard forces a change before anything else loads, so a
+  // predictable starter password is only ever usable once.
+  mustChangePassword Boolean @default(false)
   name          String
   phone         String?
   avatarUrl     String?
@@ -625,6 +629,8 @@ model User {
 
   @@index([collegeId])
   @@map("users")
+  academicChangeReviews  AcademicChangeRequest[] @relation("AcademicChangeReviewer")
+  passwordResetTokens    PasswordResetToken[]
 }
 
 // ============================================================
@@ -662,6 +668,11 @@ model Student {
   // student. Explicit flags, TPO-overridable, per the RCOEM teardown finding
   // that this can't be safely inferred.
   hasPlacementAccess      Boolean @default(true)
+  // Last time this student opened the Opportunities list. The sidebar
+  // badge counts drives published since — so it behaves like an unread
+  // marker and clears on view, instead of being a permanent tally of
+  // every open drive.
+  opportunitiesSeenAt DateTime?
   eligibleForPlacements   Boolean @default(true)
   interestedInJobs        Boolean @default(true)
   interestedInInternships Boolean @default(true)
@@ -715,6 +726,7 @@ model Student {
   @@index([batchId])
   @@index([departmentId])
   @@map("students")
+  academicChangeRequests AcademicChangeRequest[]
 }
 
 enum StudentDocumentCategory {
@@ -2581,4 +2593,52 @@ model PlatformAuditLog {
   @@index([createdAt])
   @@index([platformAdminId])
   @@map("platform_audit_logs")
+}
+
+// A student-raised request to correct their own academic record. The
+// student's Student row is NOT touched when one is raised — only an
+// approval writes the value. That is the whole point: eligibility rules
+// run on these numbers, so a self-declared CGPA must never reach them
+// unreviewed. See app/api/profile/academic-requests.
+model AcademicChangeRequest {
+  id             String    @id @default(cuid())
+  collegeId      String
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  field          String // AGGREGATE | LIVE_BACKLOGS | CLOSED_BACKLOGS
+  // Snapshot of the value at the moment the request was raised, so a
+  // reviewer can see what it is being changed FROM even if staff edited
+  // the record in the meantime.
+  currentValue   Float?
+  requestedValue Float
+  reason         String
+  status         String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
+  reviewedById   String?
+  reviewedBy     User?     @relation("AcademicChangeReviewer", fields: [reviewedById], references: [id])
+  reviewedAt     DateTime?
+  reviewNote     String?
+  createdAt      DateTime  @default(now())
+
+  @@index([studentId])
+  @@index([collegeId, status])
+  @@map("academic_change_requests")
+}
+
+// One-time tokens for "set your password" (new accounts) and "reset your
+// password" (forgotten). Only the SHA-256 hash is stored: a leaked database
+// dump must not hand out working links, exactly as with passwordHash.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  collegeId String?
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  purpose   String // SET_PASSWORD | RESET_PASSWORD
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }

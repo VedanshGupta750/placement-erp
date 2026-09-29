@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 # itself, committing it would be redundant and bloat history).
 *.docx
 placement-erp-for-intern.zip
+
+# Local email capture (EMAIL_DRIVER=log)
+.mail/

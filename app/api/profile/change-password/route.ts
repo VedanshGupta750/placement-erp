@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   const passwordHash = await hashPassword(parsed.data.newPassword);
-  await db.user.update({ where: { id: session.userId }, data: { passwordHash } });
+  await db.user.update({ where: { id: session.userId }, data: { passwordHash, mustChangePassword: false } });
 
   return NextResponse.json({ ok: true });
 }

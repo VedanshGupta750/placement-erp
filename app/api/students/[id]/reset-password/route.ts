@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
-  await db.user.update({ where: { id: student.userId }, data: { passwordHash } });
+  await db.user.update({ where: { id: student.userId }, data: { passwordHash, mustChangePassword: true } });
   clearLoginAttempts(student.user.email);
 
   await recordAudit(db, {

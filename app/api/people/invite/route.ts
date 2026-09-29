@@ -4,6 +4,8 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { inviteUserSchema } from "@/lib/validators/people";
 import { generateTempPassword, hashPassword } from "@/lib/auth/password";
+import { sendPasswordLink } from "@/lib/auth/password-reset";
+import { emailDeliveryConfigured } from "@/lib/email/send";
 
 // Creates the User immediately in INVITED status (rather than a
 // request-only row that later provisions a User) — simpler for v1, still
@@ -60,5 +62,21 @@ export async function POST(request: Request) {
     data: { collegeId: session.collegeId, email: data.email.toLowerCase().trim(), name: data.name, userType: data.userType, status: "INVITED", invitedAt: new Date() },
   });
 
-  return NextResponse.json({ ok: true, userId: user.id, tempPassword });
+  // Prefer an emailed set-password link; fall back to showing the temp
+  // password only when no mail provider is configured.
+  const invite = await sendPasswordLink({
+    userId: user.id,
+    name: data.name,
+    email: data.email.toLowerCase().trim(),
+    purpose: "SET_PASSWORD",
+    collegeId: session.collegeId,
+  }).catch(() => null);
+
+  return NextResponse.json({
+    ok: true,
+    userId: user.id,
+    inviteSent: Boolean(invite?.delivered),
+    emailConfigured: emailDeliveryConfigured(),
+    tempPassword: invite?.delivered ? undefined : tempPassword,
+  });
 }
