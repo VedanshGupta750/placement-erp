@@ -41,6 +41,11 @@ export default async function OpportunitiesPage() {
     );
   }
 
+  // Opening the list is what marks it seen, which is what clears the sidebar
+  // badge. Written after the guard above so a user with no student profile
+  // never touches it.
+  await db.student.update({ where: { id: student.id }, data: { opportunitiesSeenAt: new Date() } });
+
   const canSeeOpportunities = student.eligibleForPlacements && student.hasPlacementAccess;
 
   const drives = canSeeOpportunities

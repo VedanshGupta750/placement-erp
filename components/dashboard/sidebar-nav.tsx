@@ -88,6 +88,7 @@ export function SidebarNav({
   canReviewExternalJobs,
   canViewFinance,
   pendingExternalJobsCount,
+  pendingAcademicRequestsCount,
 }: {
   userType: "STUDENT" | "FACULTY" | "MANAGEMENT" | "PLACEMENT_TEAM";
   isAdmin: boolean;
@@ -97,6 +98,7 @@ export function SidebarNav({
   canReviewExternalJobs?: boolean;
   canViewFinance?: boolean;
   pendingExternalJobsCount?: number;
+  pendingAcademicRequestsCount?: number;
 }) {
   const pathname = usePathname();
   const isActive = (href: string) => (href === "/dashboard" ? pathname === href : pathname.startsWith(href));
@@ -141,7 +143,7 @@ export function SidebarNav({
         isActive={isActive}
         items={[
           { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-          { href: "/students", label: "Students", icon: Users },
+          { href: "/students", label: "Students", icon: Users, badge: pendingAcademicRequestsCount },
           { href: "/companies", label: "Companies", icon: Building2 },
           { href: "/contacts", label: "Contacts", icon: Contact },
           { href: "/drives", label: "Drives", icon: Briefcase },

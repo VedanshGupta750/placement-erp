@@ -46,7 +46,11 @@ export function NotificationBell() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
-    const interval = window.setInterval(() => void load(), 60000);
+    // 60s was long enough that a request raised in another tab looked like
+    // it had never arrived. Polling is now 20s and, more importantly, the
+    // bell also refreshes whenever the window regains focus — which is what
+    // actually happens when a TPO switches back to the tab.
+    const interval = window.setInterval(() => void load(), 20000);
     const onWorkerMessage = (event: MessageEvent) => {
       if (event.data?.type === "PUSH_NOTIFICATION_RECEIVED") void load();
     };
@@ -55,11 +59,13 @@ export function NotificationBell() {
     };
     navigator.serviceWorker?.addEventListener("message", onWorkerMessage);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(interval);
       navigator.serviceWorker?.removeEventListener("message", onWorkerMessage);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
     };
   }, [load]);
 

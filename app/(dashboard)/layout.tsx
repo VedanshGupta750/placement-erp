@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarDays, Contact, Home, MessageCircleQuestion, MessageSquare } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { hasPermission } from "@/lib/rbac/guard";
@@ -28,29 +29,46 @@ export default async function DashboardLayout({ children }: { children: React.Re
       email: true,
       avatarUrl: true,
       userType: true,
+      mustChangePassword: true,
       role: { select: { name: true } },
       college: { select: { name: true, logoUrl: true } },
       departmentMemberships: { select: { isAdmin: true } },
     },
   });
 
+  // Nothing in the app loads while the account still holds the password the
+  // placement cell set — a predictable starter password must be usable
+  // exactly once. /first-password sits outside this layout so it can render.
+  if (user.mustChangePassword) redirect("/first-password");
+
   let opportunitiesCount: number | undefined;
   if (user.userType === "STUDENT") {
     const student = await db.student.findUnique({
       where: { userId: session.userId },
-      select: { id: true, courseId: true, eligibleForPlacements: true },
+      select: { id: true, courseId: true, eligibleForPlacements: true, opportunitiesSeenAt: true },
     });
     if (student) {
       // Drives this student could still ACT on: open to their course and
       // not already applied to. The previous version counted every open
       // matching drive, so the badge never went down after applying — and
       // it ran an application.count() whose result was thrown away.
+      // An unread-style badge: only drives that appeared since this student
+      // last opened the list. Counting every open drive meant the badge
+      // never moved no matter how often they looked at it.
       opportunitiesCount = student.eligibleForPlacements
         ? await db.drive.count({
             where: {
               status: { in: ["PUBLISHED", "REGISTRATION_OPEN"] },
               eligibleCourses: { some: { courseId: student.courseId } },
               applications: { none: { studentId: student.id } },
+              ...(student.opportunitiesSeenAt
+                ? {
+                    OR: [
+                      { publishedAt: { gt: student.opportunitiesSeenAt } },
+                      { publishedAt: null, createdAt: { gt: student.opportunitiesSeenAt } },
+                    ],
+                  }
+                : {}),
             },
           })
         : 0;
@@ -62,6 +80,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const canViewAudit = user.userType !== "STUDENT" && (await hasPermission(session, "audit.view"));
   const showStaffTools = user.userType !== "STUDENT";
   const canReviewExternalJobs = showStaffTools && (await hasPermission(session, "external_job.view"));
+  // Academic corrections a student has raised and nobody has actioned.
+  // Shown on the Students nav item so the queue is visible without opening
+  // students one at a time.
+  const pendingAcademicRequestsCount =
+    user.userType !== "STUDENT"
+      ? await db.academicChangeRequest.count({ where: { status: "PENDING" } })
+      : undefined;
+
   const pendingExternalJobsCount = canReviewExternalJobs
     ? await db.externalJobReview.count({ where: { status: "PENDING" } })
     : undefined;
@@ -95,6 +121,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           canViewAudit={canViewAudit}
           canReviewExternalJobs={canReviewExternalJobs}
           pendingExternalJobsCount={pendingExternalJobsCount}
+          pendingAcademicRequestsCount={pendingAcademicRequestsCount}
           canViewFinance={canViewFinance}
         />
       }
