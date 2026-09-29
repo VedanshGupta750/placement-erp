@@ -266,6 +266,234 @@ pages**.
 
 ---
 
+## 4bis. Changes made in the follow-up session (2026-09-27 → 29)
+
+### 4bis.1 Applicant screening filters
+
+`app/(dashboard)/applications/page.tsx` gained **company**, **min/max CGPA**,
+**min 10th/12th**, **placement status** and an explicit **"Exclude
+already-placed students"** checkbox. `placed` is always derived from a
+placing offer via `lib/students/placement.ts`, never from the
+`Student.placementStatus` column.
+
+Applicants who already hold an offer now carry a `Placed · <Company>` badge
+rather than being hidden — a placed student applying elsewhere is a policy
+question the TPO should see. A **CGPA** column and a **Resume** link were
+added to the same table.
+
+Verified against live data: 78 unfiltered → `placed` 10 + `unplaced` 68
+partitions exactly; `companyId` counts match the database per company.
+
+### 4bis.2 Eligibility roster
+
+`components/drives/eligibility-results-panel.tsx` gained chips for
+**Eligible, not applied** and **Applied**, an **Exclude placed** toggle with
+a live count, filters for **min/max CGPA, max backlogs, course and
+overridden-only**, and a CSV **Export** that emits exactly the filtered rows
+(UTF-8 BOM so Excel doesn't mangle names).
+
+Manual overrides became **multi-select**: one decision and one reason can
+now cover a whole cohort. The API accepts `studentIds[]` and is
+**all-or-nothing** — if any student is outside the drive's candidate pool the
+entire request is rejected and nothing is written.
+
+### 4bis.3 Company-level eligibility
+
+New `components/companies/eligibility-tab.tsx`, deliberately grouped **by
+drive** rather than rolled into one company-wide figure: eligibility is
+defined per drive, so a company running two drives with different cut-offs
+has two different eligible populations.
+
+### 4bis.4 Resumes
+
+The chain `Application.resumeId → Resume → File.dataUrl` was always wired,
+but **40 of 41 seeded resumes had no File**, so every TPO-facing link showed
+the "not downloadable" fallback.
+
+- `prisma/seed-pdf.ts` builds a valid one-page PDF (correct xref/trailer);
+  the seed now creates a real `File` per resume.
+- `scripts/backfill-resume-files.ts` repairs databases seeded earlier. Only
+  touches `fileId IS NULL`, so genuine uploads are never overwritten. Run
+  once: 40 repaired, 41/41 now downloadable.
+- Resume links added to the drive **Applicants** panel and the Applications
+  table; new `GET /api/drives/[id]/resumes` returns every applicant's resume
+  as a ZIP, named by enrollment number, with a `_missing-resumes.txt`
+  manifest rather than silently dropping anyone.
+
+### 4bis.5 Student-raised academic corrections
+
+New `AcademicChangeRequest` model + migration
+`20260929000000_add_academic_change_requests`.
+
+Students **cannot** edit CGPA or backlogs — verified: the profile API strips
+academic keys, and `/api/students/[id]/backlogs` and `/semester-results`
+return 403 for a student session. Instead they raise a **request**
+(CGPA / live backlogs / dead backlogs, reason required, one pending request
+per field). The record only changes when staff **approve** it, from the
+student's own Academic tab. Approval writes the value, stamps
+`academicsVerifiedAt` — the first code in the app to use that long-dormant
+column — records the approver's name, notifies the student and writes an
+audit row.
+
+### 4bis.6 Email, set-password and self-service reset
+
+The app previously had **no email provider at all**. Invites and imports
+generated a password and discarded it in the same line, so bulk-imported
+accounts had a password nobody had ever seen; `/forgot-password` was a
+static page telling students to phone the placement cell.
+
+- `lib/email/send.ts` — one seam, driver chosen by `EMAIL_DRIVER`:
+  `log` (default, writes to `.mail/`, nothing leaves the machine),
+  `smtp` (college mail host, SES SMTP, Resend, Postmark), `noop` for CI.
+- `PasswordResetToken` model + migration
+  `20260929120000_add_password_reset_tokens`. Only the SHA-256 **hash** is
+  stored. `SET_PASSWORD` lives 72h, `RESET_PASSWORD` 2h.
+- New `/forgot-password` form, `/set-password` page, and
+  `POST /api/auth/forgot-password` + `GET|POST /api/auth/set-password`.
+- Invite, single-add and bulk import now email a **set-password link**
+  instead of surfacing a password; the temp password is only returned when
+  no mail provider is configured.
+- `ChangePasswordDialog` was mounted **only in the staff branch** of the
+  profile page — students had no way to change their own password despite
+  the API allowing it. Now mounted in the student view too.
+
+Verified: identical responses for registered and unregistered addresses
+(no enumeration), only the real address produced mail, weak passwords
+rejected, token single-use, old password stops working, rate limit trips on
+the 6th request.
+
+### 4bis.7 Starter password and forced first-login change
+
+Email is built but not yet delivering (see §4bis.6), so students needed a way
+in that does not depend on it.
+
+- `User.mustChangePassword` + migration `20260929150000_add_must_change_password`.
+- `lib/auth/default-password.ts` — a TPO-created student starts with their
+  **enrollment number** as the password. Deliberately per-student rather than
+  one shared college-wide value: a shared password opens *every* account that
+  hasn't been used yet, an enrollment number opens exactly one, and the
+  student already knows theirs so nothing has to be communicated.
+  `DEFAULT_STUDENT_PASSWORD` overrides it with a fixed value if preferred.
+- The `(dashboard)` layout redirects to `/first-password` while the flag is
+  set, so **no part of the app loads** until it is replaced — the starter
+  password is usable exactly once. The page sits outside that layout group so
+  it can render without looping.
+- The endpoint refuses the starter password as the replacement, and a TPO
+  "Reset password" re-arms the flag.
+
+### 4bis.8 One-time academic self-entry
+
+The same first-login screen collects **10th %, 12th %, overall CGPA and
+semester-wise SGPA** from students. That window is gated on
+`mustChangePassword`, so it genuinely closes after one use — verified: a
+second attempt returns 400 and leaves the values untouched.
+
+Entered values are written to the Student row and `StudentSemesterResult`,
+visible immediately to staff, but **`academicsVerifiedAt` is deliberately NOT
+stamped** — they are self-declared until someone checks them. Afterwards a
+student can only propose changes through `AcademicChangeRequest` (§4bis.5).
+
+The form carries an explicit notice to fill in only what applies and only
+figures backed by a marksheet, and states that it can be entered once.
+
+### 4bis.9 Board scores are editable by staff
+
+`PATCH /api/students/[id]` has always accepted `tenthScore`, `twelfthScore`,
+`diplomaScore` and `aggregate` behind `student.view_sensitive`, but the
+Academic tab rendered them read-only. Added `BoardScoresEditor` — the
+control was missing, not the capability. Add-student also gained 10th/12th
+fields (client, schema and storage).
+
+### 4bis.10 Notification and badge corrections
+
+- **`SelectValue` showed raw cuids** instead of names in the Add-student
+  dialog. Base UI renders the raw value unless given a render function; the
+  three selects now map value → label. Dialog overflow fixed at the same time.
+- **Notifications were working all along** — the API returned the correct
+  `unreadCount` for the TPO. Two things made them look broken: the bell polled
+  only every 60s (now 20s, and it also refreshes on window focus), and the
+  academic-request notification linked to the student's **Overview** tab, so
+  clicking it landed nowhere near the request. The student page now accepts
+  `?tab=` and the notification deep-links to `?tab=academic`.
+- **Opportunities badge** was a permanent tally of open drives, so viewing
+  never changed it. Now unread-style via `Student.opportunitiesSeenAt`
+  (migration `20260929170000_add_opportunities_seen_at`); opening the list
+  marks it seen.
+
+### 4bis.11 Academic request panel corrections
+
+- **Stale value across field types.** The "Correct value" box kept its number
+  when the field type changed, so `9.2` entered as a CGPA stayed put after
+  switching to "Live backlogs" while the hint below it changed to "a whole
+  number" — the number and the rule contradicting each other on screen. The
+  value now clears on field change and after a successful submit. The server
+  had always rejected it (`400`, whole-number rule), so nothing invalid could
+  be stored; it was purely a confusing form.
+- **Missing space** in "1 request isawaiting review" — the sentence was split
+  across a JSX expression and a line break. Rebuilt as one string.
+- **Unbounded growth.** Both request lists now scroll (`max-h-56`) instead of
+  stretching the card forever. On the TPO side only the *reviewed* history
+  scrolls tightly; pending items get a taller cap, because those need
+  actioning and hiding them behind a scroll works against the reviewer.
+
+Discoverability, after a request sat unnoticed:
+
+- **Academic tab trigger** carries an amber pending count, visible from the
+  tab strip without opening the tab.
+- **Students sidebar item** carries the total pending count across all
+  students, so the queue is visible without opening anyone.
+
+These are **pending counts, not read/unread**: a request that has been seen
+but not actioned still needs the reviewer, so the badge clears on
+approve/reject rather than on view. The general read/unread system (§5, item
+11) is still the separate, unbuilt piece.
+
+### 4bis.12 Multi-batch (graduating year) support
+
+Batches were modelled correctly from the start — `Batch` unique per
+`(collegeId, year)`, students and drives both carry a `batchId`, and
+`lib/eligibility-runner.ts` resolves candidates with
+`where: { batchId: drive.batchId, ... }`. Creating and populating a 2027 or
+2028 cohort already worked.
+
+**But drives could not target one.** Both `app/api/drives/route.ts` and
+`app/api/drives/import/route.ts` did:
+
+```ts
+db.batch.findFirstOrThrow({ orderBy: { year: "desc" } })
+```
+
+Every new drive silently attached to the **highest batch year**, with no
+picker anywhere. Harmless with a single batch; wrong the moment a second
+exists — a drive meant for 2026 would land on 2027 and evaluate zero
+candidates, with nothing on screen explaining why. A 2027 batch already
+existed in the database, so this was live, not theoretical.
+
+Fixed:
+
+1. **Batch selector on the new-drive form**, defaulting to the batch the user
+   is working in (the header switcher), *not* the newest year. Server
+   resolution order: explicit `batchId` → active batch → newest.
+2. **`batchYear` column in the drive import template**, resolved per row and
+   falling back to the batch chosen on the import screen. An unknown year now
+   errors instead of silently using the wrong cohort, and an import with no
+   batches at all fails with a clear message rather than throwing.
+3. **Batch shown on the drive page header** (`Company · JOB · Batch 2026`)
+   and under each title in the drives list.
+4. **Batch selector on the student import screen**, applied to any row that
+   leaves `batchYear` blank — the column is now optional, so a
+   single-cohort sheet needn't repeat it on every line. A value in the CSV
+   always wins.
+
+Duplicate-drive already copied `source.batchId` and needed no change.
+
+Verified: an explicit 2027 drive landed on 2027; a drive created with no
+`batchId` while the active context was 2026 landed on **2026** despite 2027
+being newer; a student imported with no `batchYear` and the selector set to
+2027 landed in 2027.
+
+---
+
 ## 5. Known issues before production
 
 ### Blockers
@@ -276,7 +504,12 @@ pages**.
 2. **No backups exist.** Use managed Postgres with PITR, plus nightly
    `pg_dump` to object storage in a different account/region, plus a
    **monthly restore drill** — an untested backup is not a backup.
-3. **No email provider.** Password resets are manual. Impossible at scale.
+3. ~~**No email provider.** Password resets are manual.~~ **Resolved** —
+   see §4bis.6. `lib/email/send.ts` ships with a `log` driver (captures to
+   `.mail/`, sends nothing) and an `smtp` driver. **Still to do before
+   production: set `EMAIL_DRIVER=smtp` and supply `SMTP_HOST` / `EMAIL_FROM`,
+   then verify the sending domain (SPF/DKIM).** Until that is done, invites
+   are captured locally and never actually delivered.
 4. **Sessions cannot be revoked.** `lib/auth/session.ts` verifies the JWT and
    never checks the database, so deactivating a user does **not** sign them
    out — up to 30 days with "remember me".
@@ -286,16 +519,50 @@ pages**.
 ### Also
 
 6. **Migration drift** — `20260917190500_add_college_branding` is applied to
-   the database but **its folder is missing from the repo**. `prisma migrate
-   dev` therefore wants to reset the database. `npm start` runs
-   `prisma migrate deploy` on every boot, so fix this before deploying.
+   the database but **its folder is missing from the repo**.
+   **Confirmed blocking**: `prisma migrate dev` refused to create a migration
+   this session and offered to reset the database ("All data will be lost").
+   Both new migrations had to be hand-written and applied with
+   `prisma migrate deploy`, which skips the drift check.
+   A fresh database is **not** affected — all migrations were applied to a
+   scratch database cleanly, and the five orphan `colleges` columns
+   (`appName`, `appShortName`, `backgroundColor`, `brandingVersion`,
+   `themeColor`) appear in no migration, no `schema.prisma` and no code.
+   **Fix: drop those five columns**, after which `migrate dev` works again.
 7. **Migrations run on app boot.** With several instances starting at once
    they race. Move to a separate release step.
 8. **Most list queries are unbounded** — only 4 of 22 student queries use
    `take`.
+8b. **Batch policy flags are settable but never enforced.** `Batch` carries
+   `registrationEnabled`, `loginAllowed`, `allowDiploma`,
+   `requireApprovalForAcademicsUpdate` and `autoApprovalOnRegistration`.
+   They appear only in `lib/validators/settings.ts` and the
+   `batch-settings-table` toggles — **no route reads them**:
+   `api/auth/login` does not check `loginAllowed`, `api/applications` does
+   not check `registrationEnabled`, and
+   `requireApprovalForAcademicsUpdate` isn't even in the settings UI.
+   Toggling them in Settings therefore changes nothing. With multiple
+   cohorts now reachable (§4bis.12) this matters: there is no way to freeze
+   registration for a graduated batch or block its logins, so an alumnus of a
+   closed batch can still sign in and apply. Worth wiring before a second
+   cohort goes live.
 9. **Plan limits are not enforced** (see §3).
 10. **21 pre-existing lint errors**, mostly `react-hooks/set-state-in-effect`.
     Unchanged by this session's work.
+11. **No general unread system.** `SidebarNav` supports a `badge` on any nav
+    item, but only four are populated (Opportunities, External Jobs, Students
+    — and of those only Opportunities is genuinely unread; the others are
+    work-queue counts). **`messagesCount` is declared
+    as a prop and never passed by the layout**, so the Messages badge can
+    never appear despite `ConversationParticipant.lastReadAt` already holding
+    the data. Nothing tells a user that something new arrived in
+    Applications, Offers, Interviews, Events or Forums.
+    *Proposed:* one `SectionSeen { userId, section, lastSeenAt }` table plus a
+    `lib/nav/unread.ts` computing every badge in one `Promise.all`, replacing
+    the one-off `Student.opportunitiesSeenAt`. Each page marks its section
+    seen on open, so a badge clears per user and not for everyone. Cost to
+    weigh: ~6-8 count queries on every page load, since the sidebar renders
+    on all of them.
 
 ---
 
@@ -327,6 +594,19 @@ VAPID_KEY_ID=
 # Cron endpoints — unset means they return 501
 CRON_SECRET=
 
+# Starter password for TPO-created students. Unset = their enrollment number,
+# which is per-student; a fixed value here is shared across every account.
+# Either way User.mustChangePassword forces a replacement at first login.
+DEFAULT_STUDENT_PASSWORD=
+
+# Email — `log` captures to .mail/ and sends nothing; `smtp` sends for real
+EMAIL_DRIVER=log
+EMAIL_FROM="Placement ERP <no-reply@yourcollege.edu>"
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+
 # Optional
 LOG_LEVEL=info
 ASSESSMENTS_APP_URL=
@@ -339,6 +619,9 @@ OPENAI_API_KEY=
 ## 7. Operational commands
 
 ```bash
+# Repair resumes seeded without a File (safe to re-run; --dry-run to preview)
+npm run db:backfill-resumes
+
 # Create or reset the first superuser (also the lockout recovery path)
 npm run platform:create-admin -- you@yourdomain.com "Your Name" YourPassword
 
