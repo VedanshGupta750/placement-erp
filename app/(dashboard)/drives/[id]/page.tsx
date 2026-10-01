@@ -216,7 +216,7 @@ export default async function DriveDetailPage({
             {drive.company.name} · {position?.positionType.replaceAll("_", " ")} · Batch {drive.batch.year}
           </p>
         </div>
-        <DriveActions id={drive.id} status={drive.status} />
+        <DriveActions id={drive.id} status={drive.status} registrationClosesAt={drive.registrationClosesAt ? drive.registrationClosesAt.toISOString() : null} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">

@@ -11,6 +11,9 @@ const ACTION_MAP: Record<string, { status: DriveStatus; permission: PermissionKe
   approve: { status: "APPROVED", permission: "drive.approve" },
   publish: { status: "PUBLISHED", permission: "drive.publish" },
   close: { status: "REGISTRATION_CLOSED", permission: "drive.close" },
+  // Reopening is publishing again, so it is gated on drive.publish rather
+  // than drive.close — closing and un-closing are not the same authority.
+  reopen: { status: "PUBLISHED", permission: "drive.publish" },
   suspend: { status: "SUSPENDED", permission: "drive.suspend" },
   complete: { status: "COMPLETED", permission: "drive.close" },
   archive: { status: "ARCHIVED", permission: "drive.archive" },
@@ -22,7 +25,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const db = getTenantDb(session.collegeId);
 
-  const { action } = await request.json().catch(() => ({ action: "publish" }));
+  const body = await request.json().catch(() => ({ action: "publish" }));
+  const { action } = body;
   const transition = ACTION_MAP[action as string];
   if (!transition) {
     return NextResponse.json({ error: "invalid_action" }, { status: 400 });
@@ -40,9 +44,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     data: {
       status: transition.status,
       publishedAt: transition.status === "PUBLISHED" ? new Date() : undefined,
+      // Reopening has to move the deadline too. /api/applications rejects on
+      // BOTH the status and registrationClosesAt, so flipping the status back
+      // while leaving a date in the past would produce a drive that looks
+      // open and refuses every application. An absent date clears it, which
+      // means "open until closed by hand".
+      ...(action === "reopen"
+        ? { registrationClosesAt: body.registrationClosesAt ? new Date(body.registrationClosesAt) : null }
+        : {}),
       approvedAt: transition.status === "APPROVED" ? new Date() : undefined,
       submittedForApprovalAt: transition.status === "PENDING_APPROVAL" ? new Date() : undefined,
-      historyEntries: { create: { actorId: session.userId, action: `STATUS_CHANGED_TO_${transition.status}` } },
+      historyEntries: { create: { actorId: session.userId, action: action === "reopen" ? "REGISTRATION_REOPENED" : `STATUS_CHANGED_TO_${transition.status}` } },
     },
     include: { company: true, eligibleCourses: { select: { courseId: true } } },
   });
@@ -57,9 +69,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       db,
       session.collegeId,
       eligibleStudents.map((s) => s.userId),
-      "drive.published",
-      "New placement drive",
-      `${drive.company.name} — '${drive.title}' has been published`,
+      action === "reopen" ? "drive.reopened" : "drive.published",
+      action === "reopen" ? "Registration reopened" : "New placement drive",
+      action === "reopen"
+        ? `${drive.company.name} — '${drive.title}' is accepting applications again`
+        : `${drive.company.name} — '${drive.title}' has been published`,
       `/opportunities/${drive.id}`,
     );
   }

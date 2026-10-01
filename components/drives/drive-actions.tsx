@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ReopenDriveDialog } from "@/components/drives/reopen-drive-dialog";
 import { toast } from "sonner";
 
-export function DriveActions({ id, status }: { id: string; status: string }) {
+export function DriveActions({ id, status, registrationClosesAt }: { id: string; status: string; registrationClosesAt: string | null }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
@@ -47,6 +48,9 @@ export function DriveActions({ id, status }: { id: string; status: string }) {
         <Button size="sm" variant="outline" disabled={pending} onClick={() => run("close", "Registrations closed")}>
           Close registrations
         </Button>
+      )}
+      {status === "REGISTRATION_CLOSED" && (
+        <ReopenDriveDialog driveId={id} closedAt={registrationClosesAt} />
       )}
       {(status === "PUBLISHED" || status === "REGISTRATION_CLOSED" || status === "SELECTION_ONGOING") && (
         <Button size="sm" variant="outline" disabled={pending} onClick={() => run("complete", "Drive marked complete")}>
