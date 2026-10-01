@@ -52,7 +52,7 @@ function CandidateRow({ driveId, candidate }: { driveId: string; candidate: Cand
         <span className="font-medium">{candidate.student.user.name}</span>
         {candidate.scheduledAt && <span className="text-muted-foreground ml-2 text-xs">{new Date(candidate.scheduledAt).toLocaleString("en-IN")}</span>}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={candidate.status} />
         {candidate.status === "ASSIGNED" && <Button size="sm" variant="outline" disabled={pending} onClick={schedule}>Schedule</Button>}
         {(candidate.status === "SCHEDULED" || candidate.status === "IN_PROGRESS") && (

@@ -265,8 +265,8 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
           <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
           <p className="text-muted-foreground text-sm">Batch roster, eligibility & placement status.</p>
         </div>
-        <div className="-mx-4 flex overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-          <div className="flex shrink-0 gap-2">
+        <div className="flex">
+          <div className="flex flex-wrap gap-2">
           <Button variant="outline" render={<a href={exportHref} />}>
             <Upload className="size-4 rotate-180" /> Export CSV
           </Button>

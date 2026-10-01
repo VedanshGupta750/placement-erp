@@ -227,7 +227,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
             <h1 className="text-2xl font-semibold tracking-tight">Applications</h1>
             <p className="text-muted-foreground text-sm">Track every student application across placement drives from application to final joining.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" render={<a href={exportHref} />}>
               <Upload className="size-4 rotate-180" /> Export
             </Button>

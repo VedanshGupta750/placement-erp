@@ -217,7 +217,7 @@ export default async function DrivesPage({ searchParams }: { searchParams: Promi
           <h1 className="text-2xl font-semibold tracking-tight">Placement Drives</h1>
           <p className="text-muted-foreground text-sm">Manage and track placement drives from creation to completion.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" render={<a href={exportHref} />}>
             <Upload className="size-4 rotate-180" /> Export
           </Button>
@@ -228,7 +228,7 @@ export default async function DrivesPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
         <StatCard icon={Briefcase} label="Total Drives" value={total} color="blue" />
         <StatCard icon={Rocket} label="Published" value={published} color="violet" />
         <StatCard icon={Users} label="Registration Open" value={registrationOpen} color="sky" />

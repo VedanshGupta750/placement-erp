@@ -185,8 +185,8 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
           <h1 className="text-2xl font-semibold tracking-tight">Contacts</h1>
           <p className="text-muted-foreground text-sm">Manage recruiter relationships, communication history and follow-ups.</p>
         </div>
-        <div className="-mx-4 flex overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-          <div className="flex shrink-0 items-center gap-2">
+        <div className="flex">
+          <div className="flex flex-wrap gap-2">
           <Button variant="outline" render={<Link href="/api/contacts/export" />}>
             <Download className="size-4" /> Export CSV
           </Button>

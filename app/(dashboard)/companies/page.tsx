@@ -140,7 +140,7 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
           <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
           <p className="text-muted-foreground text-sm">Manage recruiter partnerships, hiring activity and placement outcomes.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" render={<a href="/api/companies/export" />}>
             <Upload className="size-4 rotate-180" /> Export CSV
           </Button>
@@ -153,7 +153,7 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
         <StatCard icon={Building2} label="Partner Companies" value={listStats.totalPartnerships} color="blue" />
         <StatCard icon={TrendingUp} label="Active Hiring" value={listStats.activeHiring} color="violet" />
         <StatCard icon={Briefcase} label="Total Drives" value={listStats.totalDrives} color="sky" />

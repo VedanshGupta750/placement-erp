@@ -98,7 +98,7 @@ export function FirstPasswordForm({ name, isStudent }: { name: string; isStudent
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="tenthScore" className="text-xs">10th %</Label>
                 <Input id="tenthScore" name="tenthScore" type="number" step="0.01" min={0} max={100} placeholder="—" />
@@ -116,7 +116,7 @@ export function FirstPasswordForm({ name, isStudent }: { name: string; isStudent
             <div className="flex flex-col gap-2">
               <Label className="text-xs">Semester-wise SGPA</Label>
               {semesters.map((row, i) => (
-                <div key={i} className="flex items-center gap-2">
+                <div key={i} className="flex flex-wrap items-center gap-2">
                   <Input
                     type="number"
                     min={1}
@@ -125,7 +125,7 @@ export function FirstPasswordForm({ name, isStudent }: { name: string; isStudent
                     onChange={(e) =>
                       setSemesters((p) => p.map((r, j) => (j === i ? { ...r, semester: e.target.value } : r)))
                     }
-                    className="w-20"
+                    className="w-16 shrink-0 sm:w-20"
                     aria-label={`Semester number for row ${i + 1}`}
                   />
                   <Input
@@ -136,6 +136,7 @@ export function FirstPasswordForm({ name, isStudent }: { name: string; isStudent
                     value={row.sgpa}
                     onChange={(e) => setSemesters((p) => p.map((r, j) => (j === i ? { ...r, sgpa: e.target.value } : r)))}
                     placeholder="SGPA"
+                    className="min-w-0 flex-1"
                     aria-label={`SGPA for row ${i + 1}`}
                   />
                   {semesters.length > 1 && (

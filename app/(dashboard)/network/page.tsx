@@ -180,8 +180,8 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
           <p className="text-muted-foreground text-sm">Connect with students, faculty, placement teams and campus members.</p>
         </div>
         {isStaff && (
-          <div className="-mx-4 max-w-[calc(100vw-2rem)] overflow-x-auto px-4 pb-1 sm:mx-0 sm:max-w-full sm:px-0">
-            <div className="flex w-max gap-2">
+          <div className="flex">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" render={<Link href="/students/import" />}>
                 <Upload className="size-4" /> Import Members
               </Button>

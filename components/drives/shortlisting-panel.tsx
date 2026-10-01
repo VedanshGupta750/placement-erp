@@ -66,7 +66,7 @@ export function ShortlistingPanel({ driveId, applicants }: { driveId: string; ap
               </div>
               {a.matchScore != null && <Badge variant="outline">{a.matchScore}% match</Badge>}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {a.status === "APPLIED" ? (
                 <Button size="sm" disabled={pendingId === a.id} onClick={() => act(a.id, "approve")}>Approve</Button>
               ) : (
