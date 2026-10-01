@@ -266,7 +266,9 @@ pages**.
 
 ---
 
-## 4bis. Changes made in the follow-up session (2026-09-27 → 29)
+## 4bis. Changes made in the follow-up sessions
+
+_2026-09-27 to 2026-10-02 · last updated 2026-10-02 00:23 IST_
 
 ### 4bis.1 Applicant screening filters
 
@@ -492,6 +494,144 @@ Verified: an explicit 2027 drive landed on 2027; a drive created with no
 being newer; a student imported with no `batchYear` and the selector set to
 2027 landed in 2027.
 
+### 4bis.13 Roles reachable from the invite form — 2026-10-01
+
+Four of the eight roles could never be assigned: the invite form sent only
+`{name, email, userType}`, and the role was derived from the type
+(Student / Faculty / Management / Placement Coordinator). **College Admin,
+TPO, Department Coordinator and Auditor were unreachable**, which the
+database confirmed — only TPO and Student had any users.
+
+- Added a **Role** select beside Type. Changing Type still moves Role to that
+  type's default, so the common case stays one click; the override is there
+  when it isn't.
+- **Security:** `roleId` arrived from the client and was written onto the user
+  with **no validation** — not even a check that the role existed. It is now
+  resolved through the tenant-scoped client first, so an id from another
+  college falls through to the default. Verified: inviting with another
+  college's Auditor id produced `Faculty @ Shri Ramdeobaba`, not the foreign
+  role.
+- Picking the Student *role* now warns that Invite creates a login with **no
+  student record**, pointing to Students → Add student instead.
+
+### 4bis.14 Select triggers showed raw cuids — 2026-10-01
+
+Base UI's `SelectValue` renders the **raw value** unless given a render
+function, so every select bound to an id displayed a cuid
+("cmu5gsvcu0095…" instead of "Data Analyst Recruitment"). A scan found **38
+such selects**: Add to drive, Add application, broadcasts, every filter
+panel, bulk-action bars, the event wizard.
+
+Fixed once in `components/ui/select.tsx` rather than at 38 call sites: the
+`Select` wrapper walks its own children, collects each `SelectItem`'s
+value → label, and `SelectValue` resolves it automatically. It traverses the
+**React element tree, not the DOM** — popup items are not mounted until the
+menu opens, but they exist as elements the whole time, so the trigger shows
+the right label on first paint. Call sites that pass their own render
+function are unaffected, and already-readable values ("PLACED") still render
+as before. The wrapper had to stay generic (`<Value, Multiple>`) or
+`onValueChange` lost its inference everywhere.
+
+### 4bis.15 Add Application dialog crashed — 2026-10-01
+
+`Cannot read properties of undefined (reading 'map')` the moment a drive was
+picked. The dialog fetched `/api/drives/picker`, which returns only
+`{id, title, companyName, isTemplate}` — that route exists for the
+Duplicate-drive dropdown. There is no `positions` key in it, so
+`selectedDrive.positions.map()` threw. TypeScript could not catch it: the
+component's `Drive` type claims `positions`, but `fetch().json()` is `any`.
+
+Repointed to `/api/drives`, whose own comment reads "Active drives +
+positions for pickers". That also fixes a permission mismatch — the picker
+requires `drive.create`, while adding an application requires
+`application.approve`, so a user with one and not the other got a silent
+empty dropdown. Added `positions ?? []`, a 403 message and an empty-state
+message so it can never fail silently again.
+
+### 4bis.16 Resumes readable in place — 2026-10-01
+
+A TPO could only download a resume. Added `FilePreviewDialog`: an overlay
+that renders the PDF inline, with download kept as a secondary action.
+Mounted on the student's Skills & Resume tab, the drive Applicants panel,
+the Applications table and the application detail page — screening 60
+candidates no longer means 60 files in Downloads.
+
+Chrome refuses to render a `data:` URL for a PDF in an iframe, so the stored
+data URI is converted to a **blob URL** on open and revoked on close.
+
+### 4bis.17 Reopening a closed drive — 2026-10-01
+
+`REGISTRATION_CLOSED` was a dead end: the only moves were Mark complete and
+Suspend.
+
+Adding a status flip alone would have shipped a broken feature.
+`/api/applications` rejects on **two** independent checks — `drive.status`
+**and** `registrationClosesAt`. Flipping only the status produces a drive
+that appears open, lists under Opportunities, and refuses every application
+with "registration has closed". The drive used for testing had a deadline
+four days in the past, so this was not hypothetical.
+
+Reopening therefore always replaces the deadline (empty clears it, meaning
+"open until closed by hand"). Gated on `drive.publish`, not `drive.close` —
+closing and un-closing are not the same authority. Students are notified with
+wording specific to reopening, and the trail records `REGISTRATION_REOPENED`
+rather than a generic status change.
+
+Verified end to end: close → reopen → **a student successfully applied**,
+which the old deadline would have blocked.
+
+### 4bis.18 Deleting a department — 2026-10-01
+
+Department relations behave three different ways, and a plain delete would
+have hit all three badly:
+
+| Relation | On delete |
+|---|---|
+| `Drive.departmentId` | required → the database **refuses** |
+| `Student.departmentId` | optional → students **silently unassigned** |
+| memberships, course links | cascade → destroyed |
+
+So the endpoint refuses when drives exist, with a reason, rather than letting
+a raw foreign-key error surface as a 500; reports how many students will be
+unassigned, both before and after; and audits the counts. Verified: a
+department with 11 drives returned 409 and survived; an empty one deleted; a
+department holding one student deleted with the **student record intact and
+simply detached**.
+
+### 4bis.19 PWA and responsive corrections — 2026-10-02
+
+**iOS cannot render a PDF in an iframe.** The resume preview above would have
+shown a blank box on iPhone and iPad, including the installed PWA. It now
+detects iOS when the dialog opens and offers the system viewer instead.
+Detection happens in the open handler, not during render, to stay SSR-safe.
+
+**Action rows overflowed on phones.** Every list page pushed its primary
+button off the right edge — Add Company, Create Drive, Add Application, Add
+Student, New contact. Two variants: a plain non-wrapping `flex` (clipped
+outright), and an `overflow-x-auto` strip (reachable only by a sideways swipe
+most people never try). Six pages now wrap. The same pattern was swept app
+wide; the Shortlisting and Rounds per-applicant action rows were fixed too.
+
+**Stat cards disagreed.** `companies` and `drives` waited until 640px for a
+second column while `applications`, `offers`, `interviews` and `students`
+used `min-[360px]`, so a phone showed one card per row on some pages and two
+on others. Now consistent.
+
+Also tightened: the first-login academic inputs (three across was ~100px each
+on a 390px screen), the semester SGPA rows, and the preview dialog's phone
+gutter.
+
+**Confirmed unaffected:** the base Dialog already caps to the viewport with
+`overflow-y-auto`, the base Table already scrolls horizontally, and the
+service worker skips `/api/` entirely — so nothing added this session is
+cached or served stale.
+
+> **Not verified:** none of §4bis.19 was checked in a real browser at real
+> viewport sizes — the Chrome extension was not connected. The fixes address
+> bugs proven by screenshots plus a code-wide sweep for the same pattern, but
+> the app is **not** confirmed across devices. Dialogs and detail pages are
+> the most likely places something still breaks.
+
 ---
 
 ## 5. Known issues before production
@@ -549,7 +689,7 @@ being newer; a student imported with no `batchYear` and the selector set to
 9. **Plan limits are not enforced** (see §3).
 10. **21 pre-existing lint errors**, mostly `react-hooks/set-state-in-effect`.
     Unchanged by this session's work.
-11. **No general unread system.** `SidebarNav` supports a `badge` on any nav
+11. **No general unread system.** _(still open as of 2026-10-02)_ `SidebarNav` supports a `badge` on any nav
     item, but only four are populated (Opportunities, External Jobs, Students
     — and of those only Opportunities is genuinely unread; the others are
     work-queue counts). **`messagesCount` is declared
