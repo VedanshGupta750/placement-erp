@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { FilePreviewDialog } from "@/components/ui/file-preview-dialog";
 import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { hasPermission } from "@/lib/rbac/guard";
@@ -223,15 +224,18 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
               {application.resume ? (
                 <div className="text-sm">
                   {application.resume.file?.dataUrl ? (
-                    <a href={application.resume.file.dataUrl} download={application.resume.file.originalName} className="font-medium hover:underline">
-                      {application.resume.name}
-                    </a>
+                    <FilePreviewDialog
+                      dataUrl={application.resume.file.dataUrl}
+                      mimeType={application.resume.file.mimeType}
+                      name={application.resume.file.originalName || application.resume.name}
+                      trigger={<span className="text-primary font-medium hover:underline">{application.resume.name}</span>}
+                    />
                   ) : (
                     <div className="font-medium">{application.resume.name}</div>
                   )}
                   <div className="text-muted-foreground text-xs">
                     Snapshot at the time of application — later resume edits don&apos;t change this.
-                    {!application.resume.file?.dataUrl && " This resume was uploaded before file download was wired up, so it isn't downloadable."}
+                    {!application.resume.file?.dataUrl && " No file is attached to this resume, so it can't be previewed."}
                   </div>
                 </div>
               ) : (

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FileText } from "lucide-react";
+import { FilePreviewDialog } from "@/components/ui/file-preview-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
@@ -95,13 +96,15 @@ export function ApplicationsTable({ rows }: { rows: ApplicationRow[] }) {
                 <TableCell className="text-sm">{a.courseLabel}</TableCell>
                 <TableCell>
                   {a.resumeUrl ? (
-                    <a
-                      href={a.resumeUrl}
-                      download={a.resumeFileName ?? `${a.enrollmentNumber}.pdf`}
-                      className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
-                    >
-                      <FileText className="size-3.5" /> Open
-                    </a>
+                    <FilePreviewDialog
+                      dataUrl={a.resumeUrl}
+                      name={a.resumeFileName ?? `${a.enrollmentNumber}.pdf`}
+                      trigger={
+                        <span className="text-primary inline-flex items-center gap-1 text-sm hover:underline">
+                          <FileText className="size-3.5" /> View
+                        </span>
+                      }
+                    />
                   ) : (
                     <span className="text-muted-foreground text-xs">—</span>
                   )}

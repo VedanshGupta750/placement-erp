@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Download, FileText } from "lucide-react";
+import { FilePreviewDialog } from "@/components/ui/file-preview-dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -84,13 +85,15 @@ export function ApplicantsPanel({ driveId, applicants }: { driveId: string; appl
             )}
             <div className="mt-1 text-xs">
               {a.resume?.file?.dataUrl ? (
-                <a
-                  href={a.resume.file.dataUrl}
-                  download={a.resume.file.originalName || `${a.student.enrollmentNumber}.pdf`}
-                  className="text-primary inline-flex items-center gap-1 hover:underline"
-                >
-                  <FileText className="size-3" /> Resume
-                </a>
+                <FilePreviewDialog
+                  dataUrl={a.resume.file.dataUrl}
+                  name={a.resume.file.originalName || `${a.student.enrollmentNumber}.pdf`}
+                  trigger={
+                    <span className="text-primary inline-flex items-center gap-1 hover:underline">
+                      <FileText className="size-3" /> Resume
+                    </span>
+                  }
+                />
               ) : (
                 <span className="text-muted-foreground inline-flex items-center gap-1">
                   <FileText className="size-3" /> No resume file

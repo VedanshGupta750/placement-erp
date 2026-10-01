@@ -3,6 +3,7 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ExternalLink } from "lucide-react";
+import { FilePreviewDialog } from "@/components/ui/file-preview-dialog";
 
 // Read-only — skills/certifications/projects/resumes are owned and edited
 // by the student themselves via /profile, not from a TPO's view of them.
@@ -14,7 +15,11 @@ export async function SkillsResumeTab({ studentId }: { studentId: string }) {
     db.studentSkill.findMany({ where: { studentId }, include: { skill: true } }),
     db.studentCertification.findMany({ where: { studentId }, orderBy: { issueDate: "desc" } }),
     db.studentProject.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
-    db.resume.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
+    db.resume.findMany({
+      where: { studentId },
+      orderBy: { createdAt: "desc" },
+      include: { file: { select: { dataUrl: true, mimeType: true, originalName: true } } },
+    }),
   ]);
 
   return (
@@ -78,15 +83,27 @@ export async function SkillsResumeTab({ studentId }: { studentId: string }) {
         <CardHeader><CardTitle className="text-base">Resumes</CardTitle></CardHeader>
         <CardContent className="flex flex-col divide-y">
           {resumes.length === 0 && <p className="text-muted-foreground text-sm">No resume uploaded.</p>}
-          {resumes.map((r: { id: string; name: string; isDefault: boolean; isValid: boolean; createdAt: Date }) => (
-            <div key={r.id} className="flex items-center justify-between py-2 text-sm">
-              <div className="flex items-center gap-2">
-                <FileText className="text-muted-foreground size-4" />
-                <span className="font-medium">{r.name}</span>
+          {resumes.map((r: {
+            id: string; name: string; isDefault: boolean; isValid: boolean; createdAt: Date;
+            file: { dataUrl: string | null; mimeType: string | null; originalName: string } | null;
+          }) => (
+            <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <div className="flex min-w-0 items-center gap-2">
+                <FileText className="text-muted-foreground size-4 shrink-0" />
+                <span className="truncate font-medium">{r.name}</span>
                 {r.isDefault && <Badge className="border-none bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">Default</Badge>}
                 {!r.isValid && <Badge variant="outline" className="text-amber-600">Needs review</Badge>}
               </div>
-              <span className="text-muted-foreground text-xs">{r.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground text-xs">
+                  {r.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+                <FilePreviewDialog
+                  dataUrl={r.file?.dataUrl ?? null}
+                  mimeType={r.file?.mimeType ?? null}
+                  name={r.file?.originalName || r.name}
+                />
+              </div>
             </div>
           ))}
         </CardContent>
