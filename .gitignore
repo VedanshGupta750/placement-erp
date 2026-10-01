@@ -15,3 +15,6 @@ placement-erp-for-intern.zip
 
 # Local email capture (EMAIL_DRIVER=log)
 .mail/
+
+# Pitch / feature-guide document (kept local)
+Placement_ERP_Complete_Feature_Guide.pdf
