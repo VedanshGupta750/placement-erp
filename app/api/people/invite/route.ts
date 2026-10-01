@@ -36,7 +36,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "email_taken", message: "This email is already registered." }, { status: 409 });
   }
 
-  let roleId = data.roleId;
+  // Validated rather than trusted: roleId arrives from the client, and the
+  // tenant client scopes this lookup, so a role id belonging to another
+  // college resolves to nothing and falls through to the default below.
+  let roleId = data.roleId
+    ? (await db.role.findFirst({ where: { id: data.roleId }, select: { id: true } }))?.id
+    : undefined;
   if (!roleId) {
     const defaultRoleName = data.userType === "STUDENT" ? "Student" : data.userType === "FACULTY" ? "Faculty" : data.userType === "MANAGEMENT" ? "Management" : "Placement Coordinator";
     const role = await db.role.findFirst({ where: { name: defaultRoleName } });

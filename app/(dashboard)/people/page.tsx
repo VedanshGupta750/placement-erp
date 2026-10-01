@@ -22,10 +22,11 @@ export default async function PeoplePage() {
     );
   }
 
-  const [users, invited, active] = await Promise.all([
+  const [users, invited, active, roles] = await Promise.all([
     db.user.findMany({ where: { userType: { not: "STUDENT" } }, include: { role: true }, orderBy: { createdAt: "desc" } }),
     db.user.count({ where: { status: "INVITED" } }),
     db.user.count({ where: { status: "ACTIVE" } }),
+    db.role.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
 
   return (
@@ -41,7 +42,7 @@ export default async function PeoplePage() {
         <StatCard icon={Clock3} label="Pending invite" value={invited} color="amber" />
       </div>
 
-      <InviteForm />
+      <InviteForm roles={roles} />
 
       <Card>
         <CardContent className="flex flex-col divide-y pt-6">
