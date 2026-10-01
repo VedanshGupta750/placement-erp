@@ -5,6 +5,7 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { hasPermission } from "@/lib/rbac/guard";
 import { Card, CardContent } from "@/components/ui/card";
 import { CreateDepartmentDialog } from "@/components/departments/create-department-dialog";
+import { DeleteDepartmentButton } from "@/components/departments/delete-department-button";
 
 export default async function DepartmentsPage() {
   const session = await requireSession();
@@ -26,9 +27,10 @@ export default async function DepartmentsPage() {
     orderBy: { name: "asc" },
   });
 
-  const studentCounts = await Promise.all(
-    departments.map((d) => db.student.count({ where: { departmentId: d.id } })),
-  );
+  const [studentCounts, canEdit] = await Promise.all([
+    Promise.all(departments.map((d) => db.student.count({ where: { departmentId: d.id } }))),
+    hasPermission(session, "settings.edit"),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -45,9 +47,20 @@ export default async function DepartmentsPage() {
           <Link key={d.id} href={`/departments/${d.id}`}>
             <Card className="transition-colors hover:bg-accent/40">
               <CardContent className="flex flex-col gap-3 pt-6">
-                <div className="flex items-center gap-2">
-                  <Building2 className="text-muted-foreground size-4" />
-                  <span className="font-medium">{d.name}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Building2 className="text-muted-foreground size-4 shrink-0" />
+                    <span className="truncate font-medium">{d.name}</span>
+                  </div>
+                  {canEdit && (
+                    <DeleteDepartmentButton
+                      departmentId={d.id}
+                      name={d.name}
+                      studentCount={studentCounts[i]}
+                      memberCount={d._count.memberships}
+                      courseCount={d._count.courses}
+                    />
+                  )}
                 </div>
                 <div className="text-muted-foreground flex items-center gap-4 text-xs">
                   <span className="flex items-center gap-1"><Users className="size-3" /> {d._count.memberships} team members</span>
