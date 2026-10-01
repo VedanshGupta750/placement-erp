@@ -6,7 +6,45 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+// Base UI's Select.Value renders the RAW value unless it is given a render
+// function, so every select bound to an id showed a cuid in its trigger
+// ("cmu5gsvcu0095..." instead of "Data Analyst Recruitment"). That was true
+// in 38 places across the app.
+//
+// Rather than hand-write a lookup at each call site, Select walks its own
+// children once per render and collects every SelectItem's value -> label.
+// Traversing the element tree (not the DOM) matters: the popup's items are
+// not mounted until it opens, but they exist as React elements the whole
+// time, so the trigger can render the right label on first paint.
+const SelectLabelsContext = React.createContext<Map<string, React.ReactNode> | null>(null)
+
+function collectItemLabels(node: React.ReactNode, into: Map<string, React.ReactNode>) {
+  React.Children.forEach(node, (child) => {
+    if (!React.isValidElement(child)) return
+    const props = child.props as { value?: unknown; children?: React.ReactNode }
+    if (child.type === SelectItem && typeof props.value === "string") {
+      into.set(props.value, props.children)
+    }
+    if (props.children) collectItemLabels(props.children, into)
+  })
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  const labels = React.useMemo(() => {
+    const map = new Map<string, React.ReactNode>()
+    collectItemLabels(children, map)
+    return map
+  }, [children])
+
+  return (
+    <SelectLabelsContext.Provider value={labels}>
+      <SelectPrimitive.Root {...props}>{children}</SelectPrimitive.Root>
+    </SelectLabelsContext.Provider>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -18,13 +56,30 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+function SelectValue({ className, children, ...props }: SelectPrimitive.Value.Props) {
+  const labels = React.useContext(SelectLabelsContext)
+
+  // An explicit render function or node always wins — call sites that
+  // already format their own label keep working unchanged.
+  const render =
+    children ??
+    ((value: unknown) => {
+      if (value === null || value === undefined || value === "") return null
+      const key = String(value)
+      const label = labels?.get(key)
+      // Falls back to the raw value, which is correct for the many selects
+      // whose values are already human-readable ("PLACED", "HIGH").
+      return label !== undefined ? label : key
+    })
+
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
       {...props}
-    />
+    >
+      {render as SelectPrimitive.Value.Props["children"]}
+    </SelectPrimitive.Value>
   )
 }
 
