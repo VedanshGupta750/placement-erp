@@ -24,11 +24,33 @@ export function AddApplicationDialog() {
   const [driveId, setDriveId] = useState("");
   const [positionId, setPositionId] = useState("");
 
+  const [drivesError, setDrivesError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open || drives.length > 0) return;
-    fetch("/api/drives/picker")
-      .then((r) => r.json())
-      .then((data) => setDrives(data.drives ?? []));
+    // /api/drives, not /api/drives/picker: the picker returns only
+    // {id, title, companyName, isTemplate} for the Duplicate-drive dropdown,
+    // so `positions` came back undefined and the position list crashed on
+    // .map(). This route is built for pickers that need positions, and is
+    // gated on application.approve — the same permission as adding an
+    // application, whereas the picker needs drive.create.
+    fetch("/api/drives")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(r.status === 403 ? "forbidden" : "failed");
+        return r.json();
+      })
+      .then((data: { drives?: Drive[] }) => {
+        setDrives((data.drives ?? []).map((d) => ({ ...d, positions: d.positions ?? [] })));
+        setDrivesError(null);
+      })
+      .catch((e: Error) => {
+        setDrives([]);
+        setDrivesError(
+          e.message === "forbidden"
+            ? "You don't have permission to add applications."
+            : "Couldn't load drives. Close and try again.",
+        );
+      });
   }, [open, drives.length]);
 
   useEffect(() => {
@@ -112,6 +134,10 @@ export function AddApplicationDialog() {
                 ))}
               </SelectContent>
             </Select>
+            {drivesError && <p className="text-destructive text-xs">{drivesError}</p>}
+            {!drivesError && drives.length === 0 && (
+              <p className="text-muted-foreground text-xs">No open drives in this batch yet.</p>
+            )}
           </div>
           {selectedDrive && (
             <div className="flex flex-col gap-1.5">
@@ -119,7 +145,7 @@ export function AddApplicationDialog() {
               <Select value={positionId} onValueChange={(v) => v && setPositionId(v)}>
                 <SelectTrigger><SelectValue placeholder="Select a position" /></SelectTrigger>
                 <SelectContent>
-                  {selectedDrive.positions.map((p) => (
+                  {(selectedDrive.positions ?? []).map((p) => (
                     <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>
                   ))}
                 </SelectContent>
