@@ -19,7 +19,8 @@ type BulkAction =
   | "add_to_drive"
   | "suspend_accounts"
   | "reactivate_accounts"
-  | "delete";
+  | "delete"
+  | "record_off_campus";
 
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -211,6 +212,78 @@ export async function POST(request: Request) {
         "/dashboard",
       );
     }
+  } else if (action === "record_off_campus") {
+    // Marking a batch of students as placed off-campus — the common case
+    // being a TPO working through a list of students who all interned at
+    // the same company. Gated on offer.create on top of student.bulk_update,
+    // same layering as add_to_drive: this moves the placement rate.
+    try {
+      await requirePermission(session, "offer.create");
+    } catch (e) {
+      if (e instanceof ForbiddenError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      throw e;
+    }
+
+    const companyName = typeof payload.companyName === "string" ? payload.companyName.trim() : "";
+    const placementType = payload.placementType === "INTERNSHIP" ? "INTERNSHIP" : "JOB";
+    if (!companyName) {
+      return NextResponse.json({ error: "validation_error", message: "Company name is required." }, { status: 400 });
+    }
+    const num = (v: unknown) => {
+      if (typeof v !== "string" && typeof v !== "number") return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 && String(v).trim() !== "" ? n : undefined;
+    };
+    const role = typeof payload.role === "string" && payload.role.trim() ? payload.role.trim() : undefined;
+    const totalCompensation = placementType === "JOB" ? num(payload.totalCompensation) : undefined;
+    const stipend = placementType === "INTERNSHIP" ? num(payload.stipend) : undefined;
+    const durationMonths = placementType === "INTERNSHIP" ? num(payload.durationMonths) : undefined;
+
+    // Students who already hold a verified record for this same company and
+    // type are skipped rather than duplicated — running the same bulk action
+    // twice (or re-running it after adding one more student) is a normal
+    // thing to do and shouldn't double-count anyone.
+    const already = await db.offCampusPlacement.findMany({
+      where: {
+        studentId: { in: students.map((s) => s.id) },
+        companyName,
+        placementType,
+        status: "VERIFIED",
+      },
+      select: { studentId: true },
+    });
+    const skip = new Set(already.map((a: { studentId: string }) => a.studentId));
+
+    for (const student of students) {
+      if (skip.has(student.id)) continue;
+      await db.offCampusPlacement.create({
+        data: {
+          collegeId: session.collegeId,
+          studentId: student.id,
+          companyName,
+          role,
+          placementType,
+          status: "VERIFIED",
+          totalCompensation,
+          stipend,
+          durationMonths,
+          recordedById: session.userId,
+          verifiedById: session.userId,
+          verifiedAt: new Date(),
+        },
+      });
+      await recordAudit(db, {
+        collegeId: session.collegeId,
+        actorId: session.userId,
+        action: "student.off_campus_recorded",
+        resourceType: "Student",
+        resourceId: student.id,
+        after: { companyName, placementType, viaBulkAction: true },
+      });
+      successCount += 1;
+    }
+
+    return NextResponse.json({ ok: true, successCount, skipped: skip.size });
   } else if (action === "delete") {
     // student.delete on top of student.bulk_update, same layering as
     // add_to_drive — this is the only irreversible action in the module.

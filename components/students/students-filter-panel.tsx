@@ -27,6 +27,7 @@ const FILTER_KEYS = [
   "minDiploma",
   "maxDiploma",
   "maxBacklogs",
+  "offCampus",
   "hasBacklogs",
   "hasHistoricalBacklogs",
   "eligible",
@@ -61,6 +62,7 @@ export function StudentsFilterPanel({ courses, batches, departments }: { courses
       "maxDiploma",
       "maxBacklogs",
       "placementStatus",
+      "offCampus",
     ]) {
       const v = fd.get(key);
       if (v && String(v).trim()) params.set(key, String(v));
@@ -96,13 +98,13 @@ export function StudentsFilterPanel({ courses, batches, departments }: { courses
           </Button>
         }
       />
-      <PopoverContent align="end" className="max-h-[min(85vh,42rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4">
-        <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
+      <PopoverContent align="end" className="max-h-[min(85dvh,42rem)] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto p-4">
+        <form onSubmit={handleSubmit} className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto">
           <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Department</Label>
               <Select name="departmentId" defaultValue={searchParams.get("departmentId") ?? undefined}>
-                <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
                 <SelectContent>
                   {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
@@ -113,7 +115,7 @@ export function StudentsFilterPanel({ courses, batches, departments }: { courses
             <div className="flex flex-col gap-1.5">
               <Label>Course</Label>
               <Select name="courseId" defaultValue={searchParams.get("courseId") ?? undefined}>
-                <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
                 <SelectContent>
                   {courses.map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.specialization ?? c.name}</SelectItem>
@@ -124,7 +126,7 @@ export function StudentsFilterPanel({ courses, batches, departments }: { courses
             <div className="flex flex-col gap-1.5">
               <Label>Batch</Label>
               <Select name="batchId" defaultValue={searchParams.get("batchId") ?? undefined}>
-                <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
                 <SelectContent>
                   {batches.map((b) => (
                     <SelectItem key={b.id} value={b.id}>{b.year}</SelectItem>
@@ -135,12 +137,41 @@ export function StudentsFilterPanel({ courses, batches, departments }: { courses
             <div className="flex flex-col gap-1.5">
               <Label>Placement status</Label>
               <Select name="placementStatus" defaultValue={searchParams.get("placementStatus") ?? undefined}>
-                <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="PLACED">Placed</SelectItem>
                   <SelectItem value="SEEKING">Seeking</SelectItem>
                   <SelectItem value="NOT_INTERESTED">Not interested</SelectItem>
                   <SelectItem value="OPTED_OUT">Opted out</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Placed via</Label>
+              {/* A separate axis from Placement status: this asks HOW they
+                  were placed, so a TPO can pull up everyone who found their
+                  own job or internship. */}
+              <Select name="offCampus" defaultValue={searchParams.get("offCampus") ?? undefined}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Any route">
+                    {(v: string) =>
+                      v === "any"
+                        ? "Off-campus (any)"
+                        : v === "JOB"
+                          ? "Off-campus job"
+                          : v === "INTERNSHIP"
+                            ? "Off-campus internship"
+                            : v === "none"
+                              ? "Campus drives only"
+                              : "Any route"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Off-campus (any)</SelectItem>
+                  <SelectItem value="JOB">Off-campus job</SelectItem>
+                  <SelectItem value="INTERNSHIP">Off-campus internship</SelectItem>
+                  <SelectItem value="none">Campus drives only</SelectItem>
                 </SelectContent>
               </Select>
             </div>

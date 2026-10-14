@@ -5,7 +5,7 @@
 // adds the pieces that page never had: applications and interview funnel
 // numbers, reusing the existing Applications/Interviews stat helpers
 // rather than recomputing them a third way.
-const PLACED_OFFER_STATUSES = ["ACCEPTED", "JOINING_PENDING", "JOINED"] as const;
+import { PLACED_OFFER_STATUSES, COUNTED_OFF_CAMPUS_STATUS, placedStudentWhere } from "@/lib/students/placement";
 
 export function median(values: number[]) {
   if (values.length === 0) return 0;
@@ -19,13 +19,23 @@ export async function getCollegeAnalytics(db: any, batchId: string | null = null
   const studentBatchWhere = batchId ? { batchId } : {};
   const studentRelBatchWhere = batchId ? { student: { batchId } } : {};
 
-  const [studentCount, students, offers, drives, partnerships, applicationCount, interviewCount, passedInterviewCount] = await Promise.all([
+  const [studentCount, students, offers, offCampus, placedCount, placedStudents, drives, partnerships, applicationCount, interviewCount, passedInterviewCount] = await Promise.all([
     db.student.count({ where: studentBatchWhere }),
     db.student.findMany({ where: studentBatchWhere, select: { id: true, courseId: true, departmentId: true, course: { select: { name: true, specialization: true } }, department: { select: { name: true } } } }),
     db.offer.findMany({
       where: { status: { in: [...PLACED_OFFER_STATUSES] }, ...studentRelBatchWhere },
       select: { studentId: true, totalCompensation: true, driveId: true, drive: { select: { companyId: true, company: { select: { name: true } } } } },
     }),
+    // Off-campus placements count towards the college's placement rate.
+    // They have no Company row (the student found the employer themselves),
+    // so they deliberately do NOT feed companiesWithOffers below.
+    db.offCampusPlacement.findMany({
+      where: { status: COUNTED_OFF_CAMPUS_STATUS, ...studentRelBatchWhere },
+      select: { studentId: true, totalCompensation: true },
+    }),
+    // Same single definition as the roster and the dashboard.
+    db.student.count({ where: { ...placedStudentWhere, ...studentBatchWhere } }),
+    db.student.findMany({ where: { ...placedStudentWhere, ...studentBatchWhere }, select: { id: true } }),
     db.drive.findMany({ where: batchId ? { batchId } : {}, select: { id: true, companyId: true, status: true, company: { select: { name: true } } } }),
     // Partnerships are a company<->college relationship, not tied to one
     // batch — never batch-scoped.
@@ -35,10 +45,37 @@ export async function getCollegeAnalytics(db: any, batchId: string | null = null
     db.roundCandidate.count({ where: { status: "PASSED", ...studentRelBatchWhere } }),
   ]);
 
-  const placedStudentIds = new Set(offers.map((o: { studentId: string }) => o.studentId));
-  const placedCount = placedStudentIds.size;
   const placementPct = studentCount > 0 ? (placedCount / studentCount) * 100 : 0;
-  const packages = offers.map((o: { totalCompensation: unknown }) => Number(o.totalCompensation));
+
+  // Split the confirmed placements by route. A student can hold both a
+  // campus offer and an off-campus record, so "both" is its own bucket
+  // instead of being double-counted or arbitrarily assigned.
+  const campusPlacedIds = new Set<string>(offers.map((o: { studentId: string }) => o.studentId));
+  const offCampusPlacedIds = new Set<string>(offCampus.map((o: { studentId: string }) => o.studentId));
+  const confirmedIds = new Set<string>(
+    (placedStudents as { id: string }[]).map((st) => st.id),
+  );
+  let placedCampusOnly = 0;
+  let placedOffCampusOnly = 0;
+  let placedBoth = 0;
+  let placedRouteUnknown = 0;
+  for (const id of confirmedIds) {
+    const campus = campusPlacedIds.has(id);
+    const off = offCampusPlacedIds.has(id);
+    if (campus && off) placedBoth += 1;
+    else if (campus) placedCampusOnly += 1;
+    else if (off) placedOffCampusOnly += 1;
+    // Confirmed by staff with no offer or off-campus record on file — a
+    // real case (a TPO who knows before the paperwork), worth showing
+    // rather than quietly folding into one of the other buckets.
+    else placedRouteUnknown += 1;
+  }
+  const packages = [
+    ...offers.map((o: { totalCompensation: unknown }) => Number(o.totalCompensation)),
+    ...offCampus
+      .filter((o: { totalCompensation: unknown }) => o.totalCompensation !== null)
+      .map((o: { totalCompensation: unknown }) => Number(o.totalCompensation)),
+  ];
   const highest = packages.length ? Math.max(...packages) : 0;
   const average = packages.length ? packages.reduce((a: number, b: number) => a + b, 0) / packages.length : 0;
   const companiesWithOffers = new Set(offers.map((o: { drive: { companyId: string } }) => o.drive.companyId)).size;
@@ -98,6 +135,7 @@ export async function getCollegeAnalytics(db: any, batchId: string | null = null
 
   return {
     studentCount, placedCount, placementPct, offerCount: offers.length, highest, average, median: median(packages),
+    placedCampusOnly, placedOffCampusOnly, placedBoth, placedRouteUnknown,
     partnerships, companiesWithOffers, driveCount: drives.length,
     applicationCount, interviewCount, interviewConversionPct,
     departmentRows, courseRows, companyRows,

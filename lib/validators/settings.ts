@@ -27,3 +27,18 @@ export const batchSettingsSchema = z.object({
   autoApprovalOnRegistration: z.boolean().optional(),
 });
 export type BatchSettingsInput = z.infer<typeof batchSettingsSchema>;
+
+// College-wide placement eligibility policy. Every threshold is nullable
+// because null means "don't check this" — distinct from a threshold of 0,
+// which for backlogs is a real and common rule ("no live backlogs").
+// z.coerce so an empty number input arriving as "" can be normalised to
+// null by the client before it gets here.
+export const eligibilityPolicySchema = z.object({
+  eligibilityPolicyEnabled: z.boolean(),
+  eligibilityMinCgpa: z.number().min(0).max(10).nullable(),
+  eligibilityMaxLiveBacklogs: z.number().int().min(0).max(50).nullable(),
+  eligibilityMinTenthScore: z.number().min(0).max(100).nullable(),
+  eligibilityMinTwelfthScore: z.number().min(0).max(100).nullable(),
+  eligibilityRequireAcademics: z.boolean(),
+});
+export type EligibilityPolicyInput = z.infer<typeof eligibilityPolicySchema>;

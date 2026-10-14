@@ -16,7 +16,8 @@
     "platform:create-admin": "tsx scripts/create-platform-admin.ts",
     "platform:revoke-perms": "tsx scripts/revoke-platform-permissions.ts",
     "db:backfill-resumes": "tsx scripts/backfill-resume-files.ts",
-    "db:backfill-student-delete-perm": "tsx scripts/backfill-student-delete-permission.ts"
+    "db:backfill-student-delete-perm": "tsx scripts/backfill-student-delete-permission.ts",
+    "db:backfill-mark-placed-perm": "tsx scripts/backfill-mark-placed-permission.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

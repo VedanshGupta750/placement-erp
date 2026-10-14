@@ -28,6 +28,7 @@ const TENANT_MODELS = new Set([
   "SelectionRound",
   "RoundCandidate",
   "Offer",
+  "OffCampusPlacement",
   "JoiningRecord",
   "Contact",
   "Event",

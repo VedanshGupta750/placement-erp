@@ -22,6 +22,7 @@ import { CommunicationTab } from "@/components/students/communication-tab";
 import { NotesTab } from "@/components/students/notes-tab";
 import { ActivityTab } from "@/components/students/activity-tab";
 import { StudentHeaderActions } from "@/components/students/student-header-actions";
+import { ConfirmPlacementDialog } from "@/components/students/confirm-placement-dialog";
 import { getStudentScopeWhere } from "@/lib/students/scope";
 
 // Student 360 — same architecture as the Event 360 page: every tab below is
@@ -70,11 +71,12 @@ export default async function StudentDetailPage({
   });
   if (!student) notFound();
 
-  const [canEdit, canMessage, canAddToDrive, canDelete, activeDrives, pendingAcademicRequests] = await Promise.all([
+  const [canEdit, canMessage, canAddToDrive, canDelete, canMarkPlaced, activeDrives, pendingAcademicRequests] = await Promise.all([
     hasPermission(session, "student.edit"),
     hasPermission(session, "message.send"),
     hasPermission(session, "application.approve"),
     hasPermission(session, "student.delete"),
+    hasPermission(session, "student.mark_placed"),
     db.drive.findMany({
       where: { status: { in: ["PUBLISHED", "REGISTRATION_OPEN"] } },
       include: { company: { select: { name: true } }, positions: { select: { id: true, title: true } } },
@@ -131,6 +133,14 @@ export default async function StudentDetailPage({
             </div>
           </div>
         </div>
+        {canMarkPlaced && (
+          <ConfirmPlacementDialog
+            studentId={student.id}
+            studentName={student.user.name}
+            confirmed={Boolean(student.placementConfirmedAt)}
+            evidence={student.placementConfirmedNote}
+          />
+        )}
         <StudentHeaderActions
           studentId={student.id}
           recipientUserId={student.userId}
@@ -185,7 +195,7 @@ export default async function StudentDetailPage({
         <TabsContent value="placement" className="mt-4"><PlacementTab studentId={student.id} /></TabsContent>
         <TabsContent value="applications" className="mt-4"><ApplicationsTab studentId={student.id} /></TabsContent>
         <TabsContent value="interviews" className="mt-4"><InterviewsTab studentId={student.id} /></TabsContent>
-        <TabsContent value="offers" className="mt-4"><OffersTab studentId={student.id} /></TabsContent>
+        <TabsContent value="offers" className="mt-4"><OffersTab studentId={student.id} studentName={student.user.name} /></TabsContent>
         <TabsContent value="joining" className="mt-4"><JoiningTab studentId={student.id} /></TabsContent>
         <TabsContent value="documents" className="mt-4"><DocumentsTab studentId={student.id} /></TabsContent>
         <TabsContent value="skills" className="mt-4"><SkillsResumeTab studentId={student.id} /></TabsContent>

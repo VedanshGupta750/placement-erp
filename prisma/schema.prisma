@@ -321,6 +321,52 @@ model College {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
+  // College-wide placement eligibility policy, set by the TPO under
+  // Settings. Before this, the "Eligible" badge on the roster was nothing
+  // but the Student.eligibleForPlacements boolean, which defaults to true
+  // — so every student read "Eligible" regardless of CGPA or backlogs, and
+  // the CGPA/backlog columns beside it fed into nothing.
+  //
+  // Disabled by default so existing colleges keep their current behaviour
+  // until a TPO deliberately turns it on. Every threshold is nullable:
+  // null means "don't check this", not zero.
+  eligibilityPolicyEnabled   Boolean @default(false)
+  eligibilityMinCgpa         Float?
+  eligibilityMaxLiveBacklogs Int?
+  eligibilityMinTenthScore   Float?
+  eligibilityMinTwelfthScore Float?
+  // When true, a student with no CGPA on file fails the policy instead of
+  // being waved through. Off by default: a fresher whose results aren't
+  // published yet shouldn't be auto-excluded.
+  eligibilityRequireAcademics Boolean @default(false)
+
+  // Placement cap ("dream offer") policy. Every part is TPO-settable under
+  // Settings — the MODE as well as the numbers, because colleges genuinely
+  // differ: some set one college-wide floor, others require each new offer
+  // to beat the student's current one by a factor. Hardcoding either would
+  // have made the feature useless to half of them.
+  placementCapEnabled    Boolean @default(false)
+  /** INCREMENT | FIXED_FLOOR | MULTIPLIER */
+  placementCapMode       String  @default("INCREMENT")
+  /** FIXED_FLOOR: the next drive must offer at least this annual CTC. */
+  placementCapFloor      Decimal? @db.Decimal(12, 2)
+  /** MULTIPLIER: the next drive must offer at least current x this. */
+  placementCapMultiplier Float?
+  /**
+   * INCREMENT: the next drive must offer at least current + this. The
+   * common Indian campus rule — a student on 6 LPA with a 4 LPA step can
+   * only chase 10 LPA and above. Stored in rupees, not lakhs.
+   */
+  placementCapIncrement  Decimal? @db.Decimal(12, 2)
+  // Crossing between technical and non-technical work is treated
+  // differently by most colleges — a CSE student who took a non-tech role
+  // is usually still allowed to chase a tech one. Off by default, in which
+  // case the rule above applies to everyone equally.
+  placementCapCrossEnabled    Boolean  @default(false)
+  placementCapCrossFloor      Decimal? @db.Decimal(12, 2)
+  placementCapCrossMultiplier Float?
+  placementCapCrossIncrement  Decimal? @db.Decimal(12, 2)
+
   subscription          Subscription?
   campuses              Campus[]
   departments           Department[]
@@ -356,6 +402,7 @@ model College {
   placementExpenses     PlacementExpense[]
   placementRevenues     PlacementRevenue[]
   budgets               Budget[]
+  offCampusPlacements   OffCampusPlacement[]
 
   @@map("colleges")
 }
@@ -494,6 +541,10 @@ model Course {
   @@unique([collegeId, name])
   @@index([collegeId])
   @@map("courses")
+  // Drives the technical/non-technical half of the placement cap. True by
+  // default so existing courses keep behaving as before until a TPO says
+  // otherwise under Settings.
+  isTechnical Boolean @default(true)
 }
 
 // Tag catalogue behind "Required Skill(s)" chips and the Popular Tags widget.
@@ -631,6 +682,9 @@ model User {
   @@map("users")
   academicChangeReviews  AcademicChangeRequest[] @relation("AcademicChangeReviewer")
   passwordResetTokens    PasswordResetToken[]
+  offCampusPlacementsRecorded OffCampusPlacement[] @relation("OffCampusPlacementRecordedBy")
+  offCampusPlacementsVerified OffCampusPlacement[] @relation("OffCampusPlacementVerifiedBy")
+  studentsPlacementConfirmed  Student[]            @relation("StudentPlacementConfirmedBy")
 }
 
 // ============================================================
@@ -663,6 +717,17 @@ model Student {
   liveBacklogs        Int           @default(0)
   closedBacklogs      Int           @default(0)
   academicsVerifiedAt DateTime?
+
+  // "Placed" is a decision someone makes, not something inferred. An
+  // accepted offer or an off-campus internship is evidence; a staff member
+  // confirms it. Until this is set the student keeps applying to drives.
+  // Reporting, the roster badge and the apply gate all read this one field
+  // (see lib/students/placement.ts).
+  placementConfirmedAt   DateTime?
+  placementConfirmedById String?
+  placementConfirmedBy   User?     @relation("StudentPlacementConfirmedBy", fields: [placementConfirmedById], references: [id], onDelete: SetNull)
+  /** Free-text note for why — "accepted TCS offer", "off-campus Zoho". */
+  placementConfirmedNote String?
 
   // Placement Policy gate — decides whether a drive even shows up for this
   // student. Explicit flags, TPO-overridable, per the RCOEM teardown finding
@@ -720,6 +785,7 @@ model Student {
   backlogs             StudentBacklog[]
   semesterResults      StudentSemesterResult[]
   skillProfile         StudentSkillProfile?
+  offCampusPlacements  OffCampusPlacement[]
 
   @@unique([collegeId, enrollmentNumber])
   @@index([collegeId])
@@ -930,7 +996,7 @@ model Resume {
 //
 // The old key was @@unique([resumeId, driveId]), which asserted a resume
 // could only ever be used once per drive. That wasn't true, and it failed
-// loudly in the wrong place â€” the apply route's plain `create` threw P2002,
+// loudly in the wrong place — the apply route's plain `create` threw P2002,
 // which its catch block reported as "You've already applied to this
 // position". The student was refused an application they had never made.
 // prisma/seed.ts and scripts/expand-college-data.ts both wrapped their
@@ -943,7 +1009,7 @@ model ResumeUsage {
   drive         Drive        @relation(fields: [driveId], references: [id], onDelete: Cascade)
   // Cascade, not the default SetNull for an optional relation: a usage whose
   // application has been deleted says "some resume went to this drive once",
-  // which is no use to anyone. Previously those orphans accumulated â€” and
+  // which is no use to anyone. Previously those orphans accumulated — and
   // under the old key one of them permanently blocked re-applying.
   applicationId String?
   application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
@@ -976,6 +1042,7 @@ model File {
   createdAt    DateTime       @default(now())
 
   resumes        Resume[]
+  offCampusProofs OffCampusPlacement[] @relation("OffCampusPlacementProof")
   driveDocuments DriveDocument[]
   offers         Offer[]
   accessLogs     FileAccessLog[]
@@ -1343,6 +1410,8 @@ model Drive {
   @@index([departmentId])
   @@index([batchId, status])
   @@map("drives")
+  /** Counterpart to Course.isTechnical for the placement cap. */
+  isTechnical Boolean @default(true)
 }
 
 // One or more roles within a drive.
@@ -2656,4 +2725,80 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+// A placement a student secured on their own, outside the college's drives —
+// an off-campus job or internship they applied for themselves.
+//
+// It is deliberately NOT an Offer. Offer.driveId is required, and the whole
+// offer lifecycle (issue -> accept -> join), the drive funnel counters and
+// every company-scoped report hang off that drive. Making driveId nullable
+// to squeeze this in would have forced null handling through ~20 reporting
+// call sites, most of which legitimately mean "offers from this company via
+// our drives" and should NOT count a placement the college had no part in.
+//
+// companyName is free text rather than a Company relation on purpose: the
+// company a student found by themselves usually has no CollegePartnership,
+// and creating partnership rows as a side effect of recording a placement
+// would corrupt the company module's own numbers.
+model OffCampusPlacement {
+  id        String  @id @default(cuid())
+  collegeId String
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  companyName   String
+  role          String?
+  placementType OffCampusPlacementType   @default(JOB)
+  // Only VERIFIED counts towards placement figures. A student reporting
+  // their own news must not move the college's placement rate until someone
+  // has seen the offer letter — same proof-then-trust shape as
+  // AcademicChangeRequest. Staff-entered records are VERIFIED on creation.
+  status        OffCampusPlacementStatus @default(REPORTED)
+
+  // JOB uses totalCompensation; INTERNSHIP uses stipend + durationMonths.
+  // Both nullable because a TPO often learns the fact before the figures.
+  totalCompensation Decimal? @db.Decimal(12, 2)
+  stipend           Decimal? @db.Decimal(10, 2)
+  durationMonths    Int?
+
+  location    String?
+  offerDate   DateTime?
+  joiningDate DateTime?
+  // Set once the student has actually started. Mirrors the campus offer's
+  // JOINED state so the Offers pages can show one lifecycle across both
+  // routes: recorded -> verified -> joined.
+  joinedAt    DateTime?
+  /** How the student found it — referral, portal, direct application. */
+  source      String?
+  notes       String?
+
+  // Offer letter or screenshot, so "verified" means something was seen.
+  proofFileId String?
+  proofFile   File?   @relation("OffCampusPlacementProof", fields: [proofFileId], references: [id])
+
+  recordedById String?
+  recordedBy   User?     @relation("OffCampusPlacementRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  verifiedById String?
+  verifiedBy   User?     @relation("OffCampusPlacementVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([collegeId, status])
+  @@index([studentId])
+  @@map("off_campus_placements")
+}
+
+enum OffCampusPlacementType {
+  JOB
+  INTERNSHIP
+}
+
+enum OffCampusPlacementStatus {
+  REPORTED
+  VERIFIED
+  REJECTED
 }

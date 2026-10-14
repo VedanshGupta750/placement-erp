@@ -44,6 +44,57 @@ export default async function AnalyticsPage() {
       </div>
 
       <Card>
+        <CardHeader><CardTitle className="text-base">How students were placed</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {a.placedCount === 0 ? (
+            <p className="text-muted-foreground py-4 text-center text-sm">No confirmed placements yet.</p>
+          ) : (
+            <>
+              {/* One bar, split by route. A placement through a college
+                  drive and one the student found themselves both count, and
+                  a placement cell is usually asked for the split. */}
+              <div className="bg-muted flex h-3 w-full overflow-hidden rounded-full">
+                {[
+                  { n: a.placedCampusOnly, cls: "bg-blue-500" },
+                  { n: a.placedBoth, cls: "bg-teal-500" },
+                  { n: a.placedOffCampusOnly, cls: "bg-violet-500" },
+                  { n: a.placedRouteUnknown, cls: "bg-muted-foreground/40" },
+                ].map((seg, i) =>
+                  seg.n > 0 ? (
+                    <div key={i} className={seg.cls} style={{ width: `${(seg.n / a.placedCount) * 100}%` }} />
+                  ) : null,
+                )}
+              </div>
+              <div className="flex flex-col gap-2 text-sm">
+                {[
+                  { label: "Through a campus drive", n: a.placedCampusOnly, cls: "bg-blue-500" },
+                  { label: "Both campus and off-campus", n: a.placedBoth, cls: "bg-teal-500" },
+                  { label: "Off-campus, found by the student", n: a.placedOffCampusOnly, cls: "bg-violet-500" },
+                  { label: "Confirmed with nothing on file yet", n: a.placedRouteUnknown, cls: "bg-muted-foreground/40" },
+                ]
+                  .filter((r) => r.n > 0)
+                  .map((r) => (
+                    <div key={r.label} className="flex items-center justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className={`size-2.5 shrink-0 rounded-full ${r.cls}`} />
+                        <span className="truncate">{r.label}</span>
+                      </span>
+                      <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+                        {r.n} · {((r.n / a.placedCount) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+              </div>
+              <p className="text-muted-foreground text-xs">
+                All {a.placedCount} count towards the {a.placementPct.toFixed(1)}% placement rate — the route doesn&apos;t
+                change whether a student is placed.
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">Placement rate by course</CardTitle></CardHeader>
         <CardContent>
           <CourseBreakdownChart data={a.courseRows.map((r) => ({ name: r.name.length > 18 ? r.name.slice(0, 18) + "…" : r.name, pct: Math.round(r.pct * 10) / 10 }))} />

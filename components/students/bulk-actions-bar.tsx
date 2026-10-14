@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase, UserX, UserCheck, Trash2 } from "lucide-react";
+import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase, UserX, UserCheck, Trash2, GraduationCap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -59,6 +60,12 @@ export function BulkActionsBar({
   const [pending, setPending] = useState(false);
   const [suspendOpen, setSuspendOpen] = useState(false);
   const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [offCampusOpen, setOffCampusOpen] = useState(false);
+  const [ocCompany, setOcCompany] = useState("");
+  const [ocRole, setOcRole] = useState("");
+  const [ocType, setOcType] = useState("INTERNSHIP");
+  const [ocAmount, setOcAmount] = useState("");
+  const [ocMonths, setOcMonths] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [impact, setImpact] = useState<Impact | null>(null);
 
@@ -150,7 +157,7 @@ export function BulkActionsBar({
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
             <Tag className="size-3.5" /> Add tag
           </DialogTrigger>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="sm:max-w-sm">
             <DialogHeader><DialogTitle>Add tag to {studentIds.length} students</DialogTitle></DialogHeader>
             <Input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="e.g. Top Performer" />
             <DialogFooter>
@@ -166,7 +173,7 @@ export function BulkActionsBar({
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
             <RefreshCw className="size-3.5" /> Change status
           </DialogTrigger>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="sm:max-w-sm">
             <DialogHeader><DialogTitle>Change placement status for {studentIds.length} students</DialogTitle></DialogHeader>
             <Select value={status} onValueChange={(v) => v && setStatus(v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -190,7 +197,7 @@ export function BulkActionsBar({
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
             <MessageSquare className="size-3.5" /> Send message
           </DialogTrigger>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="sm:max-w-sm">
             <DialogHeader><DialogTitle>Notify {studentIds.length} students</DialogTitle></DialogHeader>
             <Input value={msgTitle} onChange={(e) => setMsgTitle(e.target.value)} placeholder="Title" />
             <Textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} placeholder="Message" rows={3} />
@@ -216,7 +223,7 @@ export function BulkActionsBar({
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
             <UserCog className="size-3.5" /> Assign coordinator
           </DialogTrigger>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="sm:max-w-sm">
             <DialogHeader><DialogTitle>Assign a coordinator to {studentIds.length} students</DialogTitle></DialogHeader>
             <Select value={coordinatorId} onValueChange={(v) => v && setCoordinatorId(v)}>
               <SelectTrigger><SelectValue placeholder={coordinators.length === 0 ? "Loading…" : "Select a coordinator"} /></SelectTrigger>
@@ -239,7 +246,7 @@ export function BulkActionsBar({
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
             <Briefcase className="size-3.5" /> Add to Drive
           </DialogTrigger>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="sm:max-w-sm">
             <DialogHeader><DialogTitle>Add {studentIds.length} students to a drive</DialogTitle></DialogHeader>
             <div className="flex flex-col gap-3">
               <Select value={driveId} onValueChange={(v) => { if (v) { setDriveId(v); setPositionId(""); } }}>
@@ -289,12 +296,80 @@ export function BulkActionsBar({
         )}
 
         {canEdit && (
+          <Dialog open={offCampusOpen} onOpenChange={setOffCampusOpen}>
+            <DialogTrigger render={<Button variant="outline" size="sm" />}>
+              <GraduationCap className="size-3.5" /> Mark off-campus
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>
+                  Mark {studentIds.length} student{studentIds.length === 1 ? "" : "s"} as placed off-campus
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label>This is a</Label>
+                  <Select value={ocType} onValueChange={(v) => v && setOcType(v)}>
+                    <SelectTrigger>
+                      <SelectValue>{(v: string) => (v === "INTERNSHIP" ? "Internship" : "Job")}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="INTERNSHIP">Internship</SelectItem>
+                      <SelectItem value="JOB">Job</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Input value={ocCompany} onChange={(e) => setOcCompany(e.target.value)} placeholder="Company *" />
+                <Input value={ocRole} onChange={(e) => setOcRole(e.target.value)} placeholder="Role (optional)" />
+                {ocType === "INTERNSHIP" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={ocAmount} onChange={(e) => setOcAmount(e.target.value)} type="number" min={0} placeholder="Stipend / month" />
+                    <Input value={ocMonths} onChange={(e) => setOcMonths(e.target.value)} type="number" min={1} max={60} placeholder="Months" />
+                  </div>
+                ) : (
+                  <Input value={ocAmount} onChange={(e) => setOcAmount(e.target.value)} type="number" min={0} placeholder="Annual CTC (optional)" />
+                )}
+                <p className="text-muted-foreground text-xs">
+                  Applies the same company and figures to everyone selected, and marks them placed. Anyone who
+                  already has this exact record is skipped rather than duplicated.
+                </p>
+              </div>
+              <DialogFooter>
+                <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+                <Button
+                  disabled={pending || !ocCompany.trim()}
+                  onClick={async () => {
+                    const ok = await run("record_off_campus", {
+                      companyName: ocCompany.trim(),
+                      role: ocRole.trim(),
+                      placementType: ocType,
+                      totalCompensation: ocType === "JOB" ? ocAmount : "",
+                      stipend: ocType === "INTERNSHIP" ? ocAmount : "",
+                      durationMonths: ocType === "INTERNSHIP" ? ocMonths : "",
+                    });
+                    if (ok) {
+                      setOffCampusOpen(false);
+                      setOcCompany("");
+                      setOcRole("");
+                      setOcAmount("");
+                      setOcMonths("");
+                    }
+                  }}
+                >
+                  {pending ? "Saving…" : "Mark as placed"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {canEdit && (
           <>
             <Dialog open={suspendOpen} onOpenChange={setSuspendOpen}>
               <DialogTrigger render={<Button variant="outline" size="sm" />}>
                 <UserX className="size-3.5" /> Suspend
               </DialogTrigger>
-              <DialogContent className="max-w-sm">
+              <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
                   <DialogTitle>
                     Suspend {studentIds.length} student{studentIds.length === 1 ? "" : "s"}?
@@ -323,7 +398,7 @@ export function BulkActionsBar({
               <DialogTrigger render={<Button variant="outline" size="sm" />}>
                 <UserCheck className="size-3.5" /> Reactivate
               </DialogTrigger>
-              <DialogContent className="max-w-sm">
+              <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
                   <DialogTitle>
                     Reactivate {studentIds.length} student{studentIds.length === 1 ? "" : "s"}?

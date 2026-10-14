@@ -15,7 +15,7 @@ import { StaffProfileTabs } from "@/components/profile/staff-profile-tabs";
 import { EditStaffProfileDialog } from "@/components/profile/edit-staff-profile-dialog";
 import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
 import { AcademicChangeRequestPanel } from "@/components/profile/academic-change-request-panel";
-import { PLACED_OFFER_STATUSES, effectivePlacementStatus, PLACEMENT_STATUS_LABELS } from "@/lib/students/placement";
+import { effectivePlacementStatus, PLACEMENT_STATUS_LABELS } from "@/lib/students/placement";
 
 export default async function ProfilePage() {
   const session = await requireSession();
@@ -72,7 +72,6 @@ export default async function ProfilePage() {
       certifications: { orderBy: { issueDate: "desc" } },
       // Placing offers only — the student's own "Placement status" row is
       // derived from these, never from the stale column.
-      offers: { where: { status: { in: [...PLACED_OFFER_STATUSES] } }, select: { id: true }, take: 1 },
       // The student's own correction requests — raising one never changes
       // the record above, so both are shown together for the contrast.
       academicChangeRequests: {
@@ -207,7 +206,7 @@ export default async function ProfilePage() {
               ["Eligible for placements", student.eligibleForPlacements],
               ["Interested in jobs", student.interestedInJobs],
               ["Interested in internships", student.interestedInInternships],
-              ["Placement status", PLACEMENT_STATUS_LABELS[effectivePlacementStatus(student.placementStatus, student.offers.length > 0)]],
+              ["Placement status", PLACEMENT_STATUS_LABELS[effectivePlacementStatus(student.placementStatus, Boolean(student.placementConfirmedAt))]],
             ].map(([label, value]) => (
               <div key={label as string} className="flex items-center justify-between">
                 <span className="text-muted-foreground">{label}</span>

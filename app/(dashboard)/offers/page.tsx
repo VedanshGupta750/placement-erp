@@ -27,6 +27,8 @@ type SearchParams = {
   offeredFrom?: string;
   offeredTo?: string;
   tab?: string;
+  /** all | campus | offcampus — which route the placement came through. */
+  source?: string;
   // Legacy params the sidebar's "Internship Offers"/"Joining" shortcuts
   // still link to (components/dashboard/sidebar-nav.tsx), predating this
   // page's tab/offerType-based scheme — handled below rather than touching
@@ -90,13 +92,58 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
     const activeBatchId = await getActiveBatchId();
     if (activeBatchId) where.student = { ...(where.student as object), batchId: activeBatchId };
 
-    const [offers, stats, funnel, deptBreakdown, drives, departments] = await Promise.all([
+    // Off-campus placements belong on these pages too: a student who found
+    // their own internship has an internship, and a TPO looking at
+    // "Internship Offers" expects to see them. They are a different model
+    // with no drive, so they are fetched separately and merged into the
+    // rows rather than forced through the Offer query.
+    //
+    // Routed by type: an off-campus JOB lands under Job Offers, an
+    // off-campus INTERNSHIP under Internship Offers.
+    const wantsInternships = params.type === "internship" || params.offerType === "INTERNSHIP";
+    const includeOffCampus =
+      params.source !== "campus" &&
+      // The status tabs are Offer-lifecycle states (draft, issued,
+      // declined...) that an off-campus record simply doesn't have, so it
+      // only appears on All and Joined.
+      (activeTab === "all" || activeTab === "joined") &&
+      !params.driveId &&
+      !params.status;
+
+    const offCampusWhere: Record<string, unknown> = {
+      status: "VERIFIED",
+      placementType: wantsInternships ? "INTERNSHIP" : "JOB",
+      ...(activeTab === "joined" ? { joinedAt: { not: null } } : {}),
+      ...(params.departmentId ? { student: { departmentId: params.departmentId } } : {}),
+      ...(params.q
+        ? {
+            OR: [
+              { student: { user: { name: { contains: params.q, mode: "insensitive" } } } },
+              { student: { enrollmentNumber: { contains: params.q, mode: "insensitive" } } },
+              { companyName: { contains: params.q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+    if (activeBatchId) {
+      offCampusWhere.student = { ...(offCampusWhere.student as object), batchId: activeBatchId };
+    }
+
+    const [offers, offCampus, stats, funnel, deptBreakdown, drives, departments] = await Promise.all([
       db.offer.findMany({
         where,
         include: { student: { include: { user: true } }, drive: { include: { company: true } } },
         orderBy: { createdAt: "desc" },
         take: 200,
       }),
+      includeOffCampus
+        ? db.offCampusPlacement.findMany({
+            where: offCampusWhere,
+            include: { student: { include: { user: true } } },
+            orderBy: { createdAt: "desc" },
+            take: 200,
+          })
+        : Promise.resolve([]),
       getOfferListStats(db, where),
       getOfferFunnel(db, where),
       getOfferDepartmentBreakdown(db, where),
@@ -116,7 +163,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
       return qs ? `/offers?${qs}` : "/offers";
     }
 
-    const rows: OfferRow[] = offers.map((o) => ({
+    const campusRows: OfferRow[] = (params.source === "offcampus" ? [] : offers).map((o) => ({
       id: o.id,
       enrollmentNumber: o.student.enrollmentNumber,
       studentName: o.student.user.name,
@@ -129,7 +176,44 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
       offerDate: o.offerDate?.toISOString() ?? null,
       joiningDate: o.joiningDate?.toISOString() ?? null,
       status: o.status,
+      source: "CAMPUS" as const,
     }));
+
+    // Decimal and Date don't cross the server/client boundary.
+    const offCampusRows: OfferRow[] = offCampus.map((p: {
+      id: string;
+      companyName: string;
+      role: string | null;
+      placementType: string;
+      totalCompensation: unknown;
+      stipend: unknown;
+      offerDate: Date | null;
+      joiningDate: Date | null;
+      joinedAt: Date | null;
+      studentId: string;
+      student: { enrollmentNumber: string; user: { name: string }; placementConfirmedAt: Date | null };
+    }) => ({
+      id: p.id,
+      enrollmentNumber: p.student.enrollmentNumber,
+      studentName: p.student.user.name,
+      studentId: p.studentId,
+      companyName: p.companyName,
+      driveTitle: p.role,
+      driveId: null,
+      offerType: p.placementType,
+      // An internship records a monthly stipend, not an annual CTC — shown
+      // as-is rather than converted, since the two aren't comparable.
+      totalCompensation: String(p.totalCompensation ?? p.stipend ?? 0),
+      offerDate: p.offerDate?.toISOString() ?? null,
+      joiningDate: p.joiningDate?.toISOString() ?? null,
+      status: p.joinedAt ? "JOINED" : "ACCEPTED",
+      source: "OFF_CAMPUS" as const,
+      studentPlaced: Boolean(p.student.placementConfirmedAt),
+    }));
+
+    const rows: OfferRow[] = [...campusRows, ...offCampusRows].sort((a, b) =>
+      (b.offerDate ?? "").localeCompare(a.offerDate ?? ""),
+    );
 
     const exportQs = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => !!e[1])).toString();
     const exportHref = exportQs ? `/api/offers/export?${exportQs}` : "/api/offers/export";

@@ -5,6 +5,10 @@ import { createApplicationSchema } from "@/lib/validators/application";
 import { computeMatchScore } from "@/lib/matching";
 import { recomputeDriveCounters } from "@/lib/drives/counters";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { prisma } from "@/lib/db";
+import { readEligibilityPolicy, evaluateStudentEligibility } from "@/lib/students/eligibility-policy";
+import { readPlacementCapPolicy, evaluatePlacementCap } from "@/lib/placement/cap";
+import { PLACED_OFFER_STATUSES } from "@/lib/students/placement";
 
 const APPLICABLE_STATUSES = new Set(["PUBLISHED", "REGISTRATION_OPEN"]);
 
@@ -12,12 +16,54 @@ export async function POST(request: Request) {
   const session = await requireSession();
   const db = getTenantDb(session.collegeId);
 
-  const student = await db.student.findUnique({ where: { userId: session.userId } });
+  const student = await db.student.findUnique({
+    where: { userId: session.userId },
+    include: { course: { select: { isTechnical: true } } },
+  });
   if (!student) {
     return NextResponse.json({ error: "not_a_student" }, { status: 403 });
   }
-  if (!student.eligibleForPlacements || !student.hasPlacementAccess) {
+  if (!student.hasPlacementAccess) {
     return NextResponse.json({ error: "not_eligible", message: "You are not currently eligible to apply for placements." }, { status: 403 });
+  }
+
+  // The college-wide eligibility policy is enforced here, not just rendered
+  // on the roster — a threshold a TPO sets in Settings that didn't actually
+  // stop anyone applying would be another settable-but-unread flag.
+  // evaluateStudentEligibility also covers the plain eligibleForPlacements
+  // block, which is why that check is no longer separate above.
+  const college = await prisma.college.findUniqueOrThrow({
+    where: { id: session.collegeId },
+    select: {
+      eligibilityPolicyEnabled: true,
+      eligibilityMinCgpa: true,
+      eligibilityMaxLiveBacklogs: true,
+      eligibilityMinTenthScore: true,
+      eligibilityMinTwelfthScore: true,
+      eligibilityRequireAcademics: true,
+      placementCapEnabled: true,
+      placementCapMode: true,
+      placementCapFloor: true,
+      placementCapMultiplier: true,
+      placementCapIncrement: true,
+      placementCapCrossEnabled: true,
+      placementCapCrossFloor: true,
+      placementCapCrossMultiplier: true,
+      placementCapCrossIncrement: true,
+    },
+  });
+  const policy = readEligibilityPolicy(college);
+  const verdict = evaluateStudentEligibility(policy, student);
+  if (!verdict.eligible) {
+    return NextResponse.json(
+      {
+        error: "not_eligible",
+        // The specific reason is returned so the student knows which figure
+        // is the problem rather than hitting an opaque wall.
+        message: `You are not currently eligible to apply for placements. ${verdict.reasons.join(" ")}`.trim(),
+      },
+      { status: 403 },
+    );
   }
 
   const body = await request.json().catch(() => null);
@@ -43,6 +89,51 @@ export async function POST(request: Request) {
   }
   if (drive.registrationClosesAt && new Date() > drive.registrationClosesAt) {
     return NextResponse.json({ error: "registration_closed", message: "Registration for this drive has closed." }, { status: 409 });
+  }
+
+  // The placement cap. Runs AFTER the drive and position are known, because
+  // the rule compares this drive's package against what the student already
+  // holds. An unplaced student is never affected — see lib/placement/cap.ts
+  // for the modes, all of which the TPO configures under Settings.
+  if (student.placementConfirmedAt) {
+    const [bestOffer, bestOffCampus] = await Promise.all([
+      db.offer.findFirst({
+        where: { studentId: student.id, status: { in: [...PLACED_OFFER_STATUSES] } },
+        orderBy: { totalCompensation: "desc" },
+        select: { totalCompensation: true, drive: { select: { isTechnical: true } } },
+      }),
+      db.offCampusPlacement.findFirst({
+        where: { studentId: student.id, status: "VERIFIED", totalCompensation: { not: null } },
+        orderBy: { totalCompensation: "desc" },
+        select: { totalCompensation: true },
+      }),
+    ]);
+
+    const offerCtc = bestOffer ? Number(bestOffer.totalCompensation) : null;
+    const offCampusCtc = bestOffCampus ? Number(bestOffCampus.totalCompensation) : null;
+    const currentCtc =
+      offerCtc !== null && offCampusCtc !== null ? Math.max(offerCtc, offCampusCtc) : (offerCtc ?? offCampusCtc);
+
+    // An off-campus record has no drive to classify, so its technical side
+    // is unknown and the cross-field rule simply doesn't fire for it.
+    const existingIsTechnical = bestOffer ? bestOffer.drive.isTechnical : null;
+
+    // The position's own band is more specific than anything on the drive;
+    // minCtc is the floor the company advertised.
+    const driveCtc = position.minCtc !== null && position.minCtc !== undefined ? Number(position.minCtc) : null;
+
+    const decision = evaluatePlacementCap(readPlacementCapPolicy(college), {
+      placed: true,
+      currentCtc,
+      studentIsTechnical: student.course.isTechnical,
+      existingIsTechnical,
+      driveCtc,
+      driveIsTechnical: drive.isTechnical,
+    });
+
+    if (!decision.allowed) {
+      return NextResponse.json({ error: "placement_cap", message: decision.reason }, { status: 403 });
+    }
   }
 
   // The resume is mandatory and must be a real, downloadable file. Three

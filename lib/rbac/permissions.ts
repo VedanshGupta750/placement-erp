@@ -26,6 +26,10 @@ export const PERMISSIONS = [
   // roster day to day (Placement/Department Coordinator) can correct a
   // record without being able to erase one.
   perm("student.delete", "Delete student records"),
+  // Confirming a placement is its own decision: it closes the student
+  // out of further drives and moves the college's reported rate, so it
+  // is deliberately not bundled into student.edit.
+  perm("student.mark_placed", "Confirm or withdraw a student placement"),
 
   perm("eligibility.view", "View eligibility rules & results"),
   perm("eligibility.create_rule", "Create eligibility rules"),
@@ -188,6 +192,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<SystemRole, "TPO">, Permis
     "student.bulk_update",
     "student.view_sensitive",
     "student.delete",
+    "student.mark_placed",
     "company.view",
     "company.create",
     "company.edit",
@@ -216,6 +221,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<SystemRole, "TPO">, Permis
   "Placement Coordinator": [
     "student.view",
     "student.edit",
+    "student.mark_placed",
     "company.view",
     "company.create",
     "company.edit",

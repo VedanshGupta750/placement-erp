@@ -22,6 +22,10 @@ export type StudentRow = {
   placementStatus: string;
   /** User.status — account access, independent of placementStatus. */
   accountStatus: string;
+  /** Why the college eligibility policy excluded them; empty when eligible. */
+  ineligibleReasons?: string[];
+  /** One entry per off-campus TYPE held — a student can have both. */
+  offCampus?: { type: string; companies: string[] }[];
 };
 
 export function StudentsTable({
@@ -107,13 +111,40 @@ export function StudentsTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  {r.placementStatus === "PLACED" ? (
-                    <Badge className="border-none bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Placed</Badge>
-                  ) : r.eligibleForPlacements ? (
+                  {/* The off-campus badge sits OUTSIDE the placed branch on
+                      purpose: holding an off-campus internship no longer
+                      makes a student placed, so a student can be Eligible
+                      and hold one at the same time — and that combination
+                      is exactly what a TPO needs to spot. */}
+                  <div className="flex flex-col items-start gap-1">
+                    {r.placementStatus === "PLACED" ? (
+                      <Badge className="border-none bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Placed</Badge>
+                    ) : r.eligibleForPlacements ? (
                     <Badge variant="outline">Eligible</Badge>
                   ) : (
-                    <Badge variant="outline" className="text-muted-foreground">Not eligible</Badge>
-                  )}
+                    // The reasons sit in a title tooltip rather than the cell
+                    // itself: on a roster of 200 the column has to stay
+                    // scannable, but "not eligible" with no cause is the
+                    // complaint that made this policy necessary.
+                      <Badge
+                        variant="outline"
+                        className="text-muted-foreground"
+                        title={r.ineligibleReasons?.length ? r.ineligibleReasons.join(" ") : undefined}
+                      >
+                        Not eligible
+                      </Badge>
+                    )}
+                    {r.offCampus?.map((oc) => (
+                      <Badge
+                        key={oc.type}
+                        variant="outline"
+                        className="border-violet-300 text-xs whitespace-nowrap text-violet-700 dark:border-violet-500/40 dark:text-violet-400"
+                        title={`${oc.companies.join(", ")} — found by the student`}
+                      >
+                        Off-campus {oc.type === "INTERNSHIP" ? "internship" : "job"}
+                      </Badge>
+                    ))}
+                  </div>
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <Link href={`/students/${r.id}`} className="text-muted-foreground hover:text-foreground" aria-label="Open profile">

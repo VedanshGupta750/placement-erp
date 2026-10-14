@@ -5,7 +5,7 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { hasPermission } from "@/lib/rbac/guard";
-import { PLACED_OFFER_STATUSES, effectivePlacementStatus, PLACEMENT_STATUS_LABELS } from "@/lib/students/placement";
+import { effectivePlacementStatus, PLACEMENT_STATUS_LABELS } from "@/lib/students/placement";
 
 // Select 2-5 students via ?ids=a,b,c and see a side-by-side metric table —
 // a stretch beyond a single profile view, useful for shortlisting/ranking
@@ -38,7 +38,6 @@ export default async function CompareStudentsPage({ searchParams }: { searchPara
       _count: { select: { applications: true, offers: true, roundCandidacies: true } },
       // Placing offers only — the Placement Status row below is derived
       // from these, not from the stale Student.placementStatus column.
-      offers: { where: { status: { in: [...PLACED_OFFER_STATUSES] } }, select: { id: true }, take: 1 },
     },
   });
   // Preserve the order ids were passed in, not DB order.
@@ -51,7 +50,7 @@ export default async function CompareStudentsPage({ searchParams }: { searchPara
     { label: "Applications", values: ordered.map((s) => s._count.applications) },
     { label: "Interview Rounds", values: ordered.map((s) => s._count.roundCandidacies) },
     { label: "Offers", values: ordered.map((s) => s._count.offers) },
-    { label: "Placement Status", values: ordered.map((s) => PLACEMENT_STATUS_LABELS[effectivePlacementStatus(s.placementStatus, s.offers.length > 0)]) },
+    { label: "Placement Status", values: ordered.map((s) => PLACEMENT_STATUS_LABELS[effectivePlacementStatus(s.placementStatus, Boolean(s.placementConfirmedAt))]) },
   ];
 
   return (

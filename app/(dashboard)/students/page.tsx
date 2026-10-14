@@ -17,7 +17,17 @@ import { AiQueryBar } from "@/components/students/ai-query-bar";
 import { hasPermission } from "@/lib/rbac/guard";
 import { getActiveBatchId } from "@/lib/batch-context";
 import { getStudentScopeWhere } from "@/lib/students/scope";
-import { placedStudentWhere, notPlacedStudentWhere, PLACED_OFFER_STATUSES, effectivePlacementStatus } from "@/lib/students/placement";
+import {
+  placedStudentWhere,
+  notPlacedStudentWhere,
+  effectivePlacementStatus,
+  andStudentWhere,
+  placementEvidenceSelect,
+  hasUnconfirmedEvidence,
+  offCampusStudentWhere,
+} from "@/lib/students/placement";
+import { readEligibilityPolicy, evaluateStudentEligibility, eligibleStudentWhere } from "@/lib/students/eligibility-policy";
+import { prisma } from "@/lib/db";
 import { getAttentionStudents } from "@/lib/dashboard/get-attention-students";
 
 type SearchParams = {
@@ -44,6 +54,8 @@ type SearchParams = {
   notApplied?: string;
   missingResume?: string;
   needsAttention?: string;
+  /** any | JOB | INTERNSHIP | none — which route placed them. */
+  offCampus?: string;
   tab?: string;
 };
 
@@ -80,6 +92,24 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   // which by default only TPO and College Admin hold.
   const canBulkEdit = (await hasPermission(session, "student.edit")) && (await hasPermission(session, "student.bulk_update"));
   const canDelete = await hasPermission(session, "student.delete");
+
+  // The college-wide eligibility policy decides what "Eligible" means on
+  // this page. Read once and used for the badge, the KPI count and the
+  // tab/filter queries, so a count can never disagree with the rows under it.
+  const policy = readEligibilityPolicy(
+    await prisma.college.findUniqueOrThrow({
+      where: { id: session.collegeId },
+      select: {
+        eligibilityPolicyEnabled: true,
+        eligibilityMinCgpa: true,
+        eligibilityMaxLiveBacklogs: true,
+        eligibilityMinTenthScore: true,
+        eligibilityMinTwelfthScore: true,
+        eligibilityRequireAcademics: true,
+      },
+    }),
+  );
+  const eligibleWhere = eligibleStudentWhere(policy);
   const db = getTenantDb(session.collegeId);
 
   // Kept separate from `where` (rather than spread into it) so a
@@ -90,6 +120,14 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const scopeWhere = await getStudentScopeWhere(db, session);
 
   const where: Record<string, unknown> = {};
+
+  // Pushed onto AND rather than assigned to a column: with a policy enabled
+  // this is a composite fragment (CGPA and backlogs and board scores), not
+  // the single boolean the filters used to set.
+  function requireEligible() {
+    const existing = (where.AND as Record<string, unknown>[]) ?? [];
+    where.AND = [...existing, eligibleWhere];
+  }
   if (params.ids) {
     where.id = { in: params.ids.split(",").filter(Boolean) };
   }
@@ -133,15 +171,15 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   if (params.maxBacklogs) where.liveBacklogs = { lte: Number(params.maxBacklogs) };
   if (params.hasBacklogs === "1") where.liveBacklogs = { gt: 0 };
   if (params.hasHistoricalBacklogs === "1") where.closedBacklogs = { gt: 0 };
-  if (params.eligible === "1") where.eligibleForPlacements = true;
+  if (params.eligible === "1") requireEligible();
   // "PLACED" is derived from offers, not read from the column — see
   // lib/students/placement.ts for why the column can't be trusted for it.
-  if (params.placementStatus === "PLACED") Object.assign(where, placedStudentWhere);
+  if (params.placementStatus === "PLACED") andStudentWhere(where, placedStudentWhere);
   else if (params.placementStatus) where.placementStatus = params.placementStatus;
   if (params.interestedJobs === "1") where.interestedInJobs = true;
   if (params.interestedInternships === "1") where.interestedInInternships = true;
   if (params.notApplied === "1") {
-    where.eligibleForPlacements = true;
+    requireEligible();
     where.applications = { none: {} };
   }
   if (params.missingResume === "1") where.resumes = { none: { isDefault: true } };
@@ -153,9 +191,14 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   // Preset saved-view tabs — each just widens `where` further, same pattern
   // as the Events list page's status tabs.
   const activeTab = TABS.some((t) => t.key === params.tab) ? params.tab! : "all";
-  if (activeTab === "eligible") where.eligibleForPlacements = true;
-  if (activeTab === "placed") Object.assign(where, placedStudentWhere);
-  if (activeTab === "not-placed") Object.assign(where, notPlacedStudentWhere);
+  if (activeTab === "eligible") requireEligible();
+  // Route filter: who was placed off-campus, and of which kind.
+  if (params.offCampus) {
+    const fragment = offCampusStudentWhere(params.offCampus);
+    if (fragment) andStudentWhere(where, fragment);
+  }
+  if (activeTab === "placed") andStudentWhere(where, placedStudentWhere);
+  if (activeTab === "not-placed") andStudentWhere(where, notPlacedStudentWhere);
   if (activeTab === "backlogs") where.liveBacklogs = { gt: 0 };
   if (activeTab === "high-cgpa") where.aggregate = { gte: 8 };
   if (activeTab === "assigned-to-me") where.assignedCoordinatorId = session.userId;
@@ -172,9 +215,17 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
         user: true,
         course: true,
         department: true,
-        // Just enough to know whether a placing offer exists, so the row's
-        // status reflects reality rather than the stale column.
-        offers: { where: { status: { in: [...PLACED_OFFER_STATUSES] } }, select: { id: true }, take: 1 },
+        // Just enough to know whether a placement exists by either route,
+        // so the row's status reflects reality rather than the stale column.
+        ...placementEvidenceSelect,
+        // Deliberately re-declared after the spread: placementSourceSelect
+        // only fetches enough to answer "is there one", and the roster also
+        // needs to show WHICH route and which employer. Later key wins.
+        offCampusPlacements: {
+          where: { status: "VERIFIED" },
+          select: { id: true, placementType: true, companyName: true },
+          orderBy: { createdAt: "desc" },
+        },
       },
       orderBy: { user: { name: "asc" } },
       take: 200,
@@ -184,8 +235,8 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     // search/filter/tab combination, for the "X of Y shown" caption.
     db.student.count({ where: { AND: [scopeWhere, where] } }),
     db.student.count({ where: batchScopeWhere }),
-    db.student.count({ where: { ...batchScopeWhere, eligibleForPlacements: true } }),
-    db.student.count({ where: { ...batchScopeWhere, ...placedStudentWhere } }),
+    db.student.count({ where: { AND: [batchScopeWhere, eligibleWhere] } }),
+    db.student.count({ where: { AND: [batchScopeWhere, placedStudentWhere] } }),
     db.student.aggregate({ where: batchScopeWhere, _avg: { aggregate: true } }),
     db.student.count({ where: { ...batchScopeWhere, liveBacklogs: { gt: 0 } } }),
     db.student.count({ where: { ...batchScopeWhere, assignedCoordinatorId: session.userId } }),
@@ -248,6 +299,8 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     eligibleForPlacements: boolean;
     placementStatus: string;
     offers: { id: string }[];
+    offCampusPlacements: { id: string; placementType: string; companyName: string }[];
+    placementConfirmedAt: Date | null;
   }) => ({
     id: s.id,
     enrollmentNumber: s.enrollmentNumber,
@@ -258,8 +311,36 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     tenthScore: s.tenthScore,
     twelfthScore: s.twelfthScore,
     liveBacklogs: s.liveBacklogs,
-    eligibleForPlacements: s.eligibleForPlacements,
-    placementStatus: effectivePlacementStatus(s.placementStatus, s.offers.length > 0),
+    ...(() => {
+      // Evaluated per row rather than read off the column, so the badge
+      // reflects the same policy as the count above the table. The reasons
+      // ride along so the roster can say WHY someone is out — previously
+      // "Not eligible" gave no clue which figure was the problem.
+      const verdict = evaluateStudentEligibility(policy, {
+        eligibleForPlacements: s.eligibleForPlacements,
+        aggregate: s.aggregate,
+        liveBacklogs: s.liveBacklogs,
+        tenthScore: s.tenthScore,
+        twelfthScore: s.twelfthScore,
+      });
+      return { eligibleForPlacements: verdict.eligible, ineligibleReasons: verdict.reasons };
+    })(),
+    placementStatus: effectivePlacementStatus(s.placementStatus, Boolean(s.placementConfirmedAt)),
+    // Evidence of a placement nobody has confirmed — surfaced on the
+    // roster so a TPO can see who still needs a decision.
+    unconfirmedEvidence: hasUnconfirmedEvidence(s),
+    // One entry per TYPE the student actually holds, not just the most
+    // recent record. Taking [0] meant a student with both an off-campus
+    // internship and an off-campus job showed whichever was created last
+    // and silently hid the other — so an internship could read as a job.
+    offCampus: ["INTERNSHIP", "JOB"]
+      .map((type) => {
+        const forType = s.offCampusPlacements.filter((p) => p.placementType === type);
+        return forType.length > 0
+          ? { type, companies: forType.map((p) => p.companyName) }
+          : null;
+      })
+      .filter((x): x is { type: string; companies: string[] } => x !== null),
     accountStatus: s.user.status,
   }));
 

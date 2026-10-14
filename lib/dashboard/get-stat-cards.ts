@@ -1,4 +1,4 @@
-import { PLACED_OFFER_STATUSES } from "@/lib/students/placement";
+import { PLACED_OFFER_STATUSES, COUNTED_OFF_CAMPUS_STATUS, placedStudentWhere } from "@/lib/students/placement";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getOverviewStats(db: any, batchId: string | null = null) {
@@ -15,6 +15,8 @@ export async function getOverviewStats(db: any, batchId: string | null = null) {
     offersIssuedCount,
     offersAwaiting,
     offers,
+    offCampus,
+    placedCount,
   ] = await Promise.all([
     db.student.count({ where: batchId ? { batchId } : {} }),
     db.student.count({ where: { eligibleForPlacements: true, ...(batchId ? { batchId } : {}) } }),
@@ -31,11 +33,31 @@ export async function getOverviewStats(db: any, batchId: string | null = null) {
     db.offer.count({ where: { status: { not: "DRAFT" }, ...studentBatchWhere } }),
     db.offer.count({ where: { status: "ISSUED", ...studentBatchWhere } }),
     db.offer.findMany({ where: { status: { in: [...PLACED_OFFER_STATUSES] }, ...studentBatchWhere }, select: { studentId: true, totalCompensation: true } }),
+    // Students placed off-campus count towards the placement rate too —
+    // the college's figure is about students, not about which route got
+    // them there. Only VERIFIED records (see lib/students/placement.ts).
+    db.offCampusPlacement.findMany({
+      where: { status: COUNTED_OFF_CAMPUS_STATUS, ...(batchId ? { student: { batchId } } : {}) },
+      select: { studentId: true, totalCompensation: true },
+    }),
+    // Placement is a confirmed decision now (lib/students/placement.ts), so
+    // it is counted straight off the student rather than inferred from
+    // offers. The offer rows above are still fetched, but only for the
+    // package maths.
+    db.student.count({ where: { ...placedStudentWhere, ...(batchId ? { batchId } : {}) } }),
   ]);
 
-  const placedStudentIds = new Set(offers.map((o: { studentId: string }) => o.studentId));
-  const placedCount = placedStudentIds.size;
-  const packages = offers.map((o: { totalCompensation: unknown }) => Number(o.totalCompensation));
+
+  // Package maths includes off-campus records that carry a figure. An
+  // off-campus internship stores a stipend and leaves totalCompensation
+  // null, so it drops out here rather than dragging the average down
+  // against annual CTCs.
+  const packages = [
+    ...offers.map((o: { totalCompensation: unknown }) => Number(o.totalCompensation)),
+    ...offCampus
+      .filter((o: { totalCompensation: unknown }) => o.totalCompensation !== null)
+      .map((o: { totalCompensation: unknown }) => Number(o.totalCompensation)),
+  ];
   const avgPackage = packages.length ? packages.reduce((a: number, b: number) => a + b, 0) / packages.length : 0;
   const sortedPackages = [...packages].sort((a, b) => a - b);
   const median = sortedPackages.length
