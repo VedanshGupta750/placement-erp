@@ -634,6 +634,126 @@ cached or served stale.
 
 ---
 
+### 4bis.20 Students could apply with no resume — 2026-10-14
+
+A student with no resume at all could apply to every drive, and the form
+said so out loud: *"you can still apply, or add one from the Resumes page
+first."* Both sides were permissive — `resumeId` was optional in
+`createApplicationSchema`, and the route only validated a resume **if one
+was sent**. Three such applications already existed in the dev database.
+
+An application with no resume is dead on arrival: there is nothing for the
+company to screen, and the drive-wide resume ZIP silently skips the student.
+
+Now required in three places:
+
+| Layer | Rule |
+|---|---|
+| `createApplicationSchema` | `resumeId` required, with a written message rather than Zod's "expected string, received undefined" |
+| `POST /api/applications` | resume must exist, belong to the caller, **and have a `File` behind it** |
+| `ApplyForm` | no usable resume → the form is replaced by an explanation and a link to Resumes; the Apply button never renders |
+
+The `fileId` check matters: `Resume.fileId` is nullable and
+`scripts/expand-college-data.ts` created rows without one, so "has a resume"
+and "has a resume a recruiter can open" are different questions. The
+opportunity page now filters on `fileId: { not: null }` too, so a file-less
+row is treated as no resume and sends the student to re-upload.
+
+The picker is pre-selected only when the student has exactly **one** resume.
+With several, they choose deliberately rather than having whichever row is
+flagged default sent to a company silently.
+
+Staff-side routes are deliberately unchanged — `/api/applications/add`,
+`/api/students/[id]/applications` and the bulk add-to-drive action are
+explicit TPO overrides and do not go through this schema.
+
+Verified against the running app as a student: no `resumeId` → 400; empty
+string → 400; another student's resume → 400; a resume with no file → 400;
+own valid resume → **200 with the resume attached and a `ResumeUsage` row**.
+The no-resume empty state and the filtered picker were both confirmed in
+rendered HTML.
+
+### 4bis.21 Suspending and deleting students in bulk — 2026-10-14
+
+Suspension existed for one student at a time, buried in the detail page's
+overflow menu. There was no delete at all, and no way to act on a group.
+
+**Bulk suspend / reactivate.** Two new actions on `/api/students/bulk`.
+These flip `User.status`, which is what the login route checks — deliberately
+*not* `Student.placementStatus`, which is placement policy on a separate
+axis (a suspended account can still be `PLACED` in the records). One audit
+entry per student, not one for the batch: "was this person's access cut off,
+and when" has to be answerable per student. Reactivation notifies each
+student; suspension deliberately does not.
+
+**Delete.** New `student.delete` permission, granted to TPO and College
+Admin only. The coordinator roles keep `student.edit` without it on purpose
+— correcting a record and erasing one are different levels of trust.
+Existing colleges need `npm run db:backfill-student-delete-perm` (already
+run here; new permissions only auto-grant to newly-provisioned colleges).
+
+The mechanics live in `lib/students/delete.ts`, because deleting a student
+is not one delete:
+
+| Relation | Handling |
+|---|---|
+| all 16 `Student` relations | `onDelete: Cascade` — the database removes them |
+| `Student.user` | `Cascade`, so deleting the **User** deletes the Student |
+| `ForumPost.author`, `ForumReply.author` | required → **deleted**; the student's own words go with them |
+| `Forum.createdBy` | required → **reassigned** to the acting staff member |
+| `Conversation.createdById` | required → **deleted** with its messages |
+
+It has to be the User row that goes. Deleting only the Student would leave a
+`userType: STUDENT` account that can still sign in but whose every page
+resolves `student.findUnique(...)` to null. And the forum/conversation rows
+are required relations, so Prisma's default `Restrict` blocks the delete
+until they are dealt with — the forum is reassigned rather than deleted
+because deleting it would cascade away **every other student's posts inside
+it**. Anything unanticipated surfaces as a foreign-key error, which both
+callers turn into a plain 409 ("suspend the account instead") rather than a
+500 and a half-deleted person.
+
+Audit entries are written **before** the delete: afterwards there is no row
+to point at, so that entry is the only remaining record of who was removed
+and what went with them.
+
+**Confirmation.** Both delete paths use the existing type-to-confirm
+`ConfirmDeleteDialog`, and fetch exact counts first
+(`/api/students/[id]/deletion-impact`, `/api/students/bulk/deletion-impact`)
+so the warning reads "this also permanently deletes 1 application, 2
+documents" instead of a vague caution. Counts are fetched *before* the
+dialog opens, so it never renders with placeholder numbers.
+
+Verified end to end against the running app, on three disposable students:
+
+- bulk suspend 3 → all `SUSPENDED`, and a suspended student's login returned
+  **403 `account_disabled`**
+- bulk reactivate 3 → all `ACTIVE`, 3 notifications, login worked again
+- single delete, on a student holding an application, a forum they created, a
+  post, a reply, and a conversation → student **and user** row gone,
+  application gone, their post and its replies gone, **the forum survived and
+  is now owned by the TPO**, another student's post inside that forum
+  survived, their conversation gone
+- bulk delete 2 → both students and both user rows gone
+- RBAC: a student calling delete, bulk delete, bulk suspend or the impact
+  endpoint got **403** on all four; a **Placement Coordinator** (has
+  `student.edit`, not `student.delete`) got **403** on all four; the target
+  row survived every attempt
+
+> **Not verified in a browser:** the dropdown item, the bulk bar buttons and
+> the "Select all N" shortcut are client-rendered on open, so they do not
+> appear in server HTML and the Chrome extension was not connected. The props
+> reach the client (`canDelete: true`) and every endpoint behind them is
+> verified above, but the click paths themselves were not exercised.
+
+> **Pre-existing inconsistency, not introduced here:** bulk suspend requires
+> `student.bulk_update`, which Placement and Department Coordinator do not
+> hold, while single-student suspend needs only `student.edit`, which they
+> do. So those roles can suspend one student but not many. That follows the
+> existing RBAC matrix; worth a decision either way.
+
+---
+
 ## 5. Known issues before production
 
 ### Blockers
