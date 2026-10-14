@@ -924,17 +924,32 @@ model Resume {
   @@map("resumes")
 }
 
+// One row per "this resume was sent with this application". The grain is the
+// APPLICATION, not the drive: a drive can have several positions, and a
+// student may legitimately apply to two of them with the same resume.
+//
+// The old key was @@unique([resumeId, driveId]), which asserted a resume
+// could only ever be used once per drive. That wasn't true, and it failed
+// loudly in the wrong place â€” the apply route's plain `create` threw P2002,
+// which its catch block reported as "You've already applied to this
+// position". The student was refused an application they had never made.
+// prisma/seed.ts and scripts/expand-college-data.ts both wrapped their
+// inserts in `.catch(() => {})`, which is how it stayed hidden.
 model ResumeUsage {
   id            String       @id @default(cuid())
   resumeId      String
   resume        Resume       @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   driveId       String
   drive         Drive        @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  // Cascade, not the default SetNull for an optional relation: a usage whose
+  // application has been deleted says "some resume went to this drive once",
+  // which is no use to anyone. Previously those orphans accumulated â€” and
+  // under the old key one of them permanently blocked re-applying.
   applicationId String?
-  application   Application? @relation(fields: [applicationId], references: [id])
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   usedAt        DateTime     @default(now())
 
-  @@unique([resumeId, driveId])
+  @@unique([resumeId, applicationId])
   @@map("resume_usages")
 }
 

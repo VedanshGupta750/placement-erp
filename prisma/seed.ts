@@ -318,7 +318,7 @@ async function main() {
         },
       });
       if (resume) {
-        await prisma.resumeUsage.create({ data: { resumeId: resume.id, driveId: drive.id, applicationId: application.id } }).catch(() => {});
+        await prisma.resumeUsage.create({ data: { resumeId: resume.id, driveId: drive.id, applicationId: application.id } });
       }
 
       if (["SHORTLISTED", "ROUND_IN_PROGRESS", "SELECTED"].includes(status)) {

@@ -73,6 +73,18 @@ export async function POST(request: Request) {
   }
   const validFieldValues = fieldValues.filter((v) => v.value.trim() && validFieldIds.has(v.fieldId));
 
+  // Checked up front rather than inferred from a unique-constraint failure.
+  // Relying on the error meant the message depended on how the driver
+  // happened to report P2002, and a DIFFERENT unique collision (ResumeUsage)
+  // was being reported as "already applied" when it was nothing of the kind.
+  const duplicate = await db.application.findFirst({
+    where: { driveId, positionId, studentId: student.id },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return NextResponse.json({ error: "already_applied", message: "You've already applied to this position." }, { status: 409 });
+  }
+
   const studentSkills = await db.studentSkill.findMany({ where: { studentId: student.id }, include: { skill: true } });
   const studentSkillNames = studentSkills.map((s) => s.skill.name);
   const requiredSkillNames = drive.requiredSkills.map((s) => s.skill.name);
@@ -96,6 +108,12 @@ export async function POST(request: Request) {
           },
         },
       });
+      // Plain create again: ResumeUsage is now keyed on (resumeId,
+      // applicationId), which is its real grain — one row per application,
+      // so applying to a second position in the same drive with the same
+      // resume records a second usage instead of colliding. The earlier
+      // upsert worked around the wrong key by re-pointing the existing row,
+      // which quietly erased which application the first usage belonged to.
       await tx.resumeUsage.create({ data: { resumeId, driveId, applicationId: app.id } });
       if (validFieldValues.length > 0) {
         await tx.applicationFieldValue.createMany({
@@ -109,8 +127,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, id: application.id });
   } catch (e) {
+    // Backstop for the race between the pre-check above and this insert.
+    // Scoped to the application's own constraint: any OTHER unique collision
+    // is a different fault and must not be dressed up as a duplicate
+    // application — mislabelling it is exactly what hid the ResumeUsage bug.
+    // Both meta.target and the message are consulted because meta.target is
+    // not reliably populated by this client version.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return NextResponse.json({ error: "already_applied", message: "You've already applied to this position." }, { status: 409 });
+      const target = Array.isArray(e.meta?.target) ? (e.meta.target as string[]).join(",") : String(e.meta?.target ?? "");
+      const haystack = `${target} ${e.message}`;
+      if (haystack.includes("studentId")) {
+        return NextResponse.json({ error: "already_applied", message: "You've already applied to this position." }, { status: 409 });
+      }
     }
     throw e;
   }
