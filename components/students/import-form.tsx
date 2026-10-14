@@ -5,13 +5,22 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
-import { Upload, Download, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Upload, Download, CheckCircle2, AlertTriangle, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IMPORT_TEMPLATE_HEADERS } from "@/lib/validators/import";
 
 type ParsedRow = Record<string, string>;
-type Result = { successRows: number; errorRows: number; errors: { rowNumber: number; field?: string; message: string }[] };
+type Result = {
+  successRows: number;
+  errorRows: number;
+  errors: { rowNumber: number; field?: string; message: string }[];
+  created?: { name: string; email: string; enrollmentNumber: string }[];
+  invitesSent?: number;
+  emailConfigured?: boolean;
+  defaultPasswordHint?: string;
+};
 
 function downloadTemplate() {
   const csv = IMPORT_TEMPLATE_HEADERS.join(",") + "\n" + "2023100001,Jane Doe,jane.doe@college.edu,B.Tech. - Computer Science & Engineering,2026,8.5,0\n";
@@ -113,10 +122,65 @@ export function ImportForm({
         )}
 
         {result && (
-          <div className="flex flex-col gap-2 rounded-md border p-3 text-sm">
+          <div className="flex flex-col gap-3 rounded-md border p-3 text-sm">
             <div className="flex items-center gap-2 text-emerald-600">
               <CheckCircle2 className="size-4" /> {result.successRows} students imported
             </div>
+
+            {/* The import used to stop at the line above. A TPO then had no
+                way to tell a student how to sign in, and no way to check a
+                failed sign-in — which reads as "the import is broken" when
+                it isn't. The starter password is the student's own
+                enrollment number, so listing it here reveals nothing the
+                roster doesn't already show. */}
+            {result.created && result.created.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">How these students sign in</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const header = "email,starterPassword";
+                      const body = result.created!.map((c) => `${c.email},${c.enrollmentNumber}`);
+                      const text = [header, ...body].join("\n");
+                      try {
+                        await navigator.clipboard.writeText(text);
+                        toast.success("Copied — paste into a sheet to circulate.");
+                      } catch {
+                        toast.error("Couldn't copy. Select the rows and copy manually.");
+                      }
+                    }}
+                  >
+                    <Copy className="size-3.5" /> Copy list
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {result.emailConfigured
+                    ? `${result.invitesSent ?? 0} of ${result.created.length} set-password emails were sent. Anyone who didn't get one can sign in with the password below, or use Forgot password.`
+                    : "No email provider is configured, so nothing was sent — pass these on yourself. Each student must change the password on first sign-in."}
+                </p>
+                <div className="max-h-56 overflow-y-auto rounded-md border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr className="text-left">
+                        <th className="px-2 py-1.5 font-medium">Email</th>
+                        <th className="px-2 py-1.5 font-medium">Starter password</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.created.map((c) => (
+                        <tr key={c.email} className="border-t">
+                          <td className="px-2 py-1.5">{c.email}</td>
+                          <td className="px-2 py-1.5 font-mono">{c.enrollmentNumber}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             {result.errorRows > 0 && (
               <div>
                 <div className="flex items-center gap-2 text-amber-600">

@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       ? await db.batch.findFirst({ where: { id: body.batchId }, select: { id: true } })
       : null;
 
-  const createdUsers: { id: string; name: string; email: string }[] = [];
+  const createdUsers: { id: string; name: string; email: string; enrollmentNumber: string }[] = [];
   const importRecord = await db.import.create({
     data: {
       collegeId: session.collegeId,
@@ -120,7 +120,12 @@ export async function POST(request: Request) {
           liveBacklogs: data.liveBacklogs ?? 0,
         },
       });
-      createdUsers.push({ id: user.id, name: data.name, email: data.email.toLowerCase().trim() });
+      createdUsers.push({
+        id: user.id,
+        name: data.name,
+        email: data.email.toLowerCase().trim(),
+        enrollmentNumber: data.enrollmentNumber,
+      });
       successRows += 1;
     } catch {
       errors.push({ rowNumber, errorCode: "UNKNOWN", message: "Couldn't create this student." });
@@ -162,6 +167,12 @@ export async function POST(request: Request) {
     successRows,
     errorRows: errors.length,
     errors: errors.slice(0, 50),
+    // Who was created and what they sign in with. Without this the import
+    // said "11 students imported" and nothing else, so a TPO had no way to
+    // tell a student their starter password — or to check one themselves
+    // when a sign-in failed. The password IS the enrollment number (see
+    // lib/auth/default-password.ts), so it is never a secret this exposes.
+    created: createdUsers.map((c) => ({ name: c.name, email: c.email, enrollmentNumber: c.enrollmentNumber })),
     invitesSent,
     // Lets the UI say "emails are not configured — students must use Forgot
     // password" rather than implying invitations went out when they did not.
