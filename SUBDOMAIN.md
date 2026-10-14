@@ -754,6 +754,578 @@ Verified end to end against the running app, on three disposable students:
 
 ---
 
+### 4bis.22 The TPO decides what "Eligible" means — 2026-10-14
+
+The roster's Status column read `Student.eligibleForPlacements` directly, and
+that column defaults to `true`. So a student with a live backlog and a 7.06
+CGPA showed **Eligible**, and the CGPA / 10th / 12th / Backlogs columns
+printed beside it fed into nothing. 45 of 49 students were flagged eligible;
+6 of them had live backlogs. The only way the badge ever said otherwise was a
+human unticking a box.
+
+Settings → **Eligibility** now carries a college-wide policy: minimum CGPA,
+minimum 10th %, minimum 12th %, maximum live backlogs, and a "treat a missing
+figure as a fail" switch. Every threshold is nullable — blank means *don't
+check this*, which is a different rule from a threshold of 0 (and 0 live
+backlogs is a real, common rule).
+
+**How the two layers combine.** `eligibleForPlacements = false` is a hard
+block and always wins: a staff member deliberately excluded that student and
+no policy should quietly re-admit them. `true` means *not blocked* — the
+policy then decides. With the policy off (the default) `true` keeps meaning
+plain "eligible", so nothing changes for an existing college until a TPO
+turns it on. No extra column was needed to tell "never touched" from
+"deliberately allowed", because both should defer to the policy anyway.
+
+**It actually bites.** The policy is enforced in `POST /api/applications`,
+not merely rendered — a threshold that didn't stop anyone applying would be
+another settable-but-unread flag, like the batch policy flags still are. The
+refusal names the figure: *"CGPA 8.4 is below the required 9."*
+
+One definition, used everywhere. `eligibleStudentWhere()` lives beside the
+evaluator so the badge, the "Eligible" KPI, the tab filter and the forecast
+denominator cannot drift — otherwise the page contradicts itself with "28
+eligible" above a list showing 44 badges. 13 unit tests pin the two to each
+other.
+
+Verified live: policy off → 44 Eligible / 0 Not eligible. Policy on at CGPA
+7.5 and zero backlogs → **28 / 16**, the KPI read **28**, the Eligible tab
+returned exactly 28 rows with none leaking, and tooltips gave the cause
+("CGPA 7.06 is below the required 7.5. 1 live backlog — none are allowed.").
+Apply blocked at 403 with the reason; a staff block still beat a passing
+policy; turning it off restored 44 / 0.
+
+> **Left switched OFF.** Thresholds are a college's own policy, so shipping
+> it enabled with numbers invented during testing would have been the wrong
+> call. Settings → Eligibility, when you want it.
+
+### 4bis.23 Forecast corrections — 2026-10-14
+
+Four problems, three of them real defects rather than presentation.
+
+**The units didn't match.** A per-*application* select rate was multiplied by
+a count of *students*. A student with three live applications has a better
+chance than any one of them does. Now the projection prefers a per-student
+rate — of students whose season is fully over, what share were placed — which
+multiplies a student count with no conversion and no assumptions. When too
+few students have finished to measure that (this college: only 3), it falls
+back to the application rate and converts it properly: a student with `n`
+live applications contributes `1 - (1-p)^n`. That assumes independence
+between applications, which isn't strictly true, so the page says so.
+
+**The interview pass rate was displayed but never used.** It sat in the
+banner beside the select rate, implying the two compounded. They don't, and
+they shouldn't — the select rate already reflects the whole funnel,
+interviews included, so multiplying them would double-count the same
+filtering step. It is now labelled context and explicitly called out as not
+compounded.
+
+**Departments were computed from a rounded rate.** `getDepartmentForecast`
+was handed `selectRatePct / 100`, so departments used 0.905 while the
+college-wide figure used 0.90476 and the parts could disagree with the whole.
+It now takes the raw rate and the basis. Verified: department +30, college
++30.
+
+**A 90.5% select rate isn't a real-world number.** That one is data, not
+code — 19 of 21 resolved applications ending in SELECTED is an artifact of
+seeding. It can't be fixed in the engine, so the engine stops pretending:
+below 30 outcomes the projection is flagged **indicative only**, with the
+sample size stated in the warning.
+
+Also corrected: the banner and the stat card both said "applications" while
+counting distinct students. It now reports both — "32 students who still have
+applications running (54 applications between them)".
+
+6 unit tests cover the arithmetic against a stubbed client, including that a
+9x swing in interview pass rate leaves the projection untouched, and that the
+projection can never exceed the number of unplaced students.
+
+### 4bis.24 ResumeUsage was keyed at the wrong grain — 2026-10-14
+
+Surfaced while testing §4bis.20, and **made routine by it**.
+
+`ResumeUsage` was `@@unique([resumeId, driveId])` — asserting a resume can
+only ever be used once per drive. A drive has several positions, so that
+isn't true. Applying to a second position with the same resume raised a
+unique violation, and the apply route's catch reported it as **"You've
+already applied to this position"** — untrue, and the application was
+refused. Separately, `applicationId` was optional with no cascade, so
+deleting an application left an orphan usage row that blocked re-applying to
+that drive permanently.
+
+It was always possible, but §4bis.20 made the resume mandatory, so every
+application now writes a usage row and the collision went from occasional to
+routine.
+
+**Why it stayed hidden:** nothing in the app ever *reads* `ResumeUsage` — it
+is written and never queried. And both `prisma/seed.ts` and
+`scripts/expand-college-data.ts` wrapped their inserts in `.catch(() => {})`,
+swallowing this exact error on every seeded run. Those catches are gone.
+
+**The fix is the key, not a workaround.** The grain is the application, not
+the drive: `@@unique([resumeId, applicationId])`. The application link is now
+`onDelete: Cascade`, so a deleted application takes its usage rows with it
+instead of leaving an orphan behind.
+
+A first attempt upserted the row to dodge the collision. That worked, but
+re-pointed the existing row at the newer application — quietly erasing which
+application the first usage belonged to. It is a plain `create` again now
+that the key is right.
+
+The duplicate check also no longer depends on reading a driver error: it is
+an explicit lookup before the insert, with the P2002 catch kept only as a
+race backstop, scoped to the application's own constraint so no other
+collision can be mislabelled again. (`e.meta.target` turned out not to be
+populated by this client version, which is exactly why inferring a
+user-facing message from it was the wrong approach.)
+
+Verified on a real two-position drive: position A **200**, same resume to
+position B **200** with *both* usage rows kept, genuine duplicate **409**.
+Deleting an application dropped its usage row (0 orphans), and re-applying
+afterwards returned **200** — previously blocked for good.
+
+### 4bis.25 Editing an offer — 2026-10-14
+
+The drive's Offers panel showed a name, a figure and **Issue to student**.
+Nothing else. A typo in a package meant withdrawing the offer and creating a
+new one.
+
+The endpoint already existed: `PATCH /api/offers/[id]/manage` with
+`action: "edit"`, gated on `offer.edit`, validated by `editOfferSchema`.
+**Nothing in the app ever called it** — a complete, tested write path with no
+caller, the same shape of gap as the batch policy flags.
+
+So this is mostly wiring: a reusable `EditOfferDialog` covering every field
+the validator accepts — offer type, total, fixed, variable, stipend, joining
+bonus and joining date — dropped into the drive's Offers panel beside Issue.
+
+Two details that aren't just wiring:
+
+**Blank means "leave it alone", not zero.** `editOfferSchema` coerces with
+`z.coerce.number()`, and `Number("")` is `0` — so posting every field would
+silently rewrite an empty stipend to ₹0. The dialog omits empty boxes from
+the payload entirely. Verified: editing an offer with no stipend left the
+column NULL rather than writing 0.
+
+**Draft only, on both sides.** The server already refused to edit anything
+past DRAFT ("withdraw and recreate it otherwise"), on the reasoning that an
+issued offer is one the student has already seen. The trigger only renders
+for a draft, so the UI and the 409 agree instead of offering an action that
+fails.
+
+**Audit added.** Compensation is the most consequential number in the module
+and was editable with no trace at all. `offer.edited` now records the full
+before-shape alongside the change, because "the package changed" is only
+answerable with what it changed *from*. `offer.withdrawn` got the same
+treatment while in that handler — a pre-existing gap, not one introduced
+here.
+
+Verified: edit returned 200 and stored every field; a student calling it got
+**403**; issuing then re-editing returned **409** with the reason; the audit
+row carried both sides. The drive page renders Edit beside Issue for a draft
+with `canEditOffer: true`.
+
+> **Confirmed in a real browser — by the user, mid-build.** The audit trail
+> shows an edit at 12:11:34 from the TPO account setting stipend ₹12,000 and
+> a joining date through this dialog, 8 seconds after the API test, followed
+> by issuing the offer. That is the click-path verification the Chrome
+> extension couldn't give for §4bis.21 and §4bis.24.
+
+> **Not added:** the same dialog isn't on the Offers list page
+> (`components/offers/offer-manage-actions.tsx`), which still has only
+> Withdraw. It's a one-line drop-in if wanted — the ask was the drive
+> section.
+
+---
+
+### 4bis.26 Off-campus placements — 2026-10-14
+
+Students who land a job or internship on their own had nowhere to be
+recorded. "Placed" was derived purely from `Offer`, and `Offer.driveId` is
+required — so a student who found their own employer stayed **Seeking**
+forever and the college under-reported its own placement rate.
+
+**A new model, not a nullable Offer.** Making `Offer.driveId` nullable would
+have pushed null handling through ~20 reporting call sites, most of which
+legitimately mean *"offers from this company via our drives"* and should not
+count a placement the college had no part in. `OffCampusPlacement` is
+separate, with `companyName` as free text rather than a `Company` relation —
+the employer a student found themselves usually has no `CollegePartnership`,
+and creating one as a side effect of recording a placement would corrupt the
+company module's own numbers.
+
+**Job vs internship is the point of the form.** The type picker swaps the
+money fields rather than showing both: a job carries an annual CTC, an
+internship a monthly stipend and a duration. Mixing them would be silently
+destructive — a ₹35,000 stipend averaged against annual CTCs. Verified: an
+internship stores `stipend` with `totalCompensation` NULL, and the dashboard
+average package stayed ₹4.73L rather than collapsing.
+
+**Verification before it counts.** Only a `VERIFIED` record moves placement
+figures. Staff-entered ones are verified on creation — the person recording
+it is the person who would otherwise verify it — and the `REPORTED` state
+exists so a student self-report path can be added without a migration.
+
+**One definition of placed.** `lib/students/placement.ts` now covers both
+routes, so the roster badge, the placed/not-placed tabs, the KPI, the
+profile, compare, the dashboard and analytics all pick it up from one place.
+
+> **A bug this nearly introduced:** `placedStudentWhere` used to be a single
+> key, so call sites did `Object.assign(where, placedStudentWhere)`. It now
+> carries a top-level `OR`, which would have silently **overwritten the
+> search `OR`** already on that object — the Placed tab combined with a name
+> search would have returned the wrong students. Added `andStudentWhere()`
+> and moved every call site onto it.
+
+**Deliberately excluded from company, contact and drive reports.** Those
+answer "how did our partnership with this company perform", and an
+off-campus placement had no drive and no partnership. Including it there
+would inflate a company's numbers with something it never ran.
+
+**Registering the model for tenant scoping was required.** `db.offCampusPlacement`
+came back `undefined` until `"OffCampusPlacement"` was added to
+`TENANT_MODELS` in `lib/tenant/scoped-db.ts` — worth remembering for the
+next model with a `collegeId`.
+
+Verified live: recording a job flipped the student to **Placed** on the
+roster, moved the placed tab from 4 to 5 students and the dashboard from
+4 to 5, and removed them from not-placed; an internship took the count to 6
+without touching the average package; editing internship→job cleared stipend
+and duration; rejecting a record dropped the count back; a student calling
+the endpoint got **403**; a blank company name got **400**. Deleting the test
+rows returned the dashboard to its baseline of 4.
+
+> **A policy question for you, not a bug:** a VERIFIED off-campus record
+> counts as placed whatever its type, which mirrors how a campus `Offer`
+> with `offerType: INTERNSHIP` already counts today. If your reporting
+> treats internships separately from final placements, that is a one-line
+> change in `placedStudentWhere` — but it is your definition to set, so I
+> matched the existing behaviour rather than inventing a new one.
+
+> **Not built:** students can't report their own off-campus placement for a
+> TPO to verify. The `REPORTED` status and the verify/reject endpoint are
+> both in place for it; only the student-facing form is missing.
+
+---
+
+### 4bis.27 Applications filters — seven were inert, and the header lied — 2026-10-14
+
+Reported as "filter is not working properly". Three separate faults.
+
+**Seven filters did nothing at all.** `handleSubmit` looped over a hardcoded
+subset of filter keys that omitted `companyId`, `minCgpa`, `maxCgpa`,
+`minTenth`, `minTwelfth`, `placement` and `excludePlaced`. Those controls
+rendered, accepted input, and threw the value away — the page reads them
+from the URL and the form never put them there. The panel kept three
+different lists (one for the badge count, one for Clear all, one for
+submitting) and they had drifted apart. There is now one `FILTER_KEYS` list
+and the submit loop derives from it, so a new filter cannot be added and
+left unreachable.
+
+Verified against the database, every figure matching exactly: no filter 84,
+`minCgpa=8` 50, `minCgpa=9.5` 8, `minTenth=90` 37, a company 16,
+`excludePlaced=1` 70, `placement=placed` 14.
+
+**The summary cards contradicted themselves.** Each card does
+`{ ...where, status: "..." }` for its own bucket, overriding the status
+constraint the active tab had already put on `where`. On the Shortlisted tab
+the header read **"Total Applications 0"** directly above **"In Progress
+2"**. The cards and the funnel are a *breakdown of the filtered population*,
+so they now get the filters with the status constraint removed. Same
+scenario now reads Total 4 / Shortlisted 0 / In Progress 2 — consistent, and
+it actually tells you something.
+
+**Nothing explained the zero.** The screenshot case — department + Civil
+Engineering on the Shortlisted tab — was genuinely 0, because Civil has 4
+applications and none are shortlisted. Correct, but indistinguishable from a
+broken filter. The caption now names the tab and offers the way out:
+*"0 applications shown in Shortlisted of 4 matching your filters. Show all
+statuses"*.
+
+**Multi-select, as asked.** Company, Drive, Status, Department and Course
+are checkbox lists with **Select all** / **Clear**, instead of single-select
+dropdowns. Values travel as one comma-joined query parameter and become a
+Prisma `in` — a single selection produces a one-element `in`, which behaves
+exactly like the old equality, so existing saved views and bookmarked URLs
+keep working. Verified: Civil 4, Mechanical 1, both together 5.
+
+`components/ui/multi-select-filter.tsx` is deliberately an inline scrollable
+list, not a nested popover — the panel is already a popover, and stacking
+two means the inner one steals the outer one's dismiss and the whole panel
+closes on the first click. Select all acts on what is *visible*, so
+searching and then selecting all does what it appears to.
+
+> **Checked, not affected:** the Students filter panel submits all 18 of its
+> keys. The Applications panel was the outlier. The drives, offers,
+> companies, contacts, interviews and network panels were not audited.
+
+---
+
+### 4bis.28 Finding and bulk-marking off-campus students — 2026-10-14
+
+§4bis.26 could *record* an off-campus placement but only one student at a
+time, from inside that student's own Offers tab, and there was no way to
+list who had one. A TPO working through "everyone who interned at Infosys"
+had to open 30 profiles. Two gaps closed.
+
+**Seeing them: a "Placed via" filter on the roster.** A separate axis from
+Placement status, because that one answers *whether* and this answers *how*:
+Off-campus (any) / Off-campus job / Off-campus internship / Campus drives
+only. Rows placed off-campus now carry a second badge under **Placed**
+naming the route, with the employer in its tooltip — so the roster answers
+"who placed themselves" without opening anything.
+
+Verified: with 3 internships and 1 job recorded, `offCampus=INTERNSHIP` → 3,
+`offCampus=JOB` → 1, `any` → 3, `none` → 42 of 45.
+
+**Marking them: a bulk action.** "Mark off-campus" joins the existing
+Students bulk bar, so it reuses the checkboxes and select-all already there.
+Pick Job or Internship, type the company, and it applies to everyone
+selected — the money fields swap with the type for the same reason the
+single dialog does.
+
+Gated on `offer.create` on top of `student.bulk_update`, the same layering
+as add-to-drive, because it moves the placement rate.
+
+**Idempotent on purpose.** Students who already hold a verified record for
+that same company *and* type are skipped, not duplicated — re-running the
+action after adding one more student to the selection is a normal thing to
+do. Verified: first run `successCount: 3, skipped: 0`; identical re-run
+`successCount: 0, skipped: 3`.
+
+> **A trap avoided:** the new `offCampus` key was added to the panel's
+> `FILTER_KEYS`, its submit loop AND its Clear-all list. §4bis.27 was caused
+> precisely by those three lists drifting apart.
+
+> **Still not covered:** the Job Offers and Internship Offers pages read the
+> `Offer` table only, so an off-campus internship does not appear under
+> "Internship Offers". Those pages are built around the offer lifecycle
+> (issue → accept → join) which an off-campus record has no equivalent of,
+> so merging them is a design decision rather than a wiring job. The roster
+> filter is the way to list them today.
+
+---
+
+### 4bis.29 Placement becomes a decision, and a TPO-set cap — 2026-10-14
+
+Four changes, one theme: the college decides, not the data.
+
+**Placed is now confirmed by a human.** It used to be derived — any accepted
+offer made a student placed. That was wrong both ways: a student can hold an
+off-campus internship and still be very much on the market, and §4bis.26
+compounded it by making every verified off-campus record auto-place someone.
+`Student.placementConfirmedAt` is now the single answer. Offers and
+off-campus records are *evidence*, surfaced on the profile; nothing marks a
+student placed on its own.
+
+Backfilled on migration from existing accepted offers, so no reported figure
+moved on deploy — 4 students confirmed, matching the 4 who held offers.
+
+**Mark as placed, behind its own permission.** `student.mark_placed`, granted
+to TPO, College Admin and Placement Coordinator. Deliberately not folded into
+`student.edit`: confirming closes the student out of further drives and moves
+the placement rate. The student is notified either way, because finding out
+by hitting a wall is worse. Run
+`npm run db:backfill-mark-placed-perm` on an existing college.
+
+**The cap is entirely TPO-set — the mode as well as the numbers.** Settings →
+Placement caps:
+
+| Mode | Rule |
+|---|---|
+| Fixed minimum package | one college-wide bar, whatever they currently hold |
+| Multiple of current | the bar scales with each placement |
+
+Plus an optional **different bar when they crossed fields** — a technical
+student who took a non-technical role, or the reverse — with branches ticked
+as technical in the same tab and drives carrying their own flag. Off by
+default, in which case one rule applies to everyone.
+
+Hardcoding either mode would have made this useless to half of the colleges
+that use it, which is why the mode is a setting and not a constant.
+
+With the cap switched off, a confirmed placement blocks further applications
+outright — the behaviour a placement cell expects by default.
+
+Verified end to end: off-campus internship recorded → `placementConfirmedAt`
+stayed **NULL**; TPO marked placed → set; student calling the endpoint →
+**403**. Cap off → blocked outright. Floor at ₹10L with the drive at ₹8L →
+*"only allows further applications at ₹10L or above, and this drive offers
+₹8L"*. Drive raised to ₹12L → allowed. Placement withdrawn → a ₹5L drive
+allowed again. 10 unit tests cover the modes, including the exact 6 LPA →
+10 LPA example and the cross-field reversal.
+
+**Responsive and PWA.** The reported symptom was the Applications filter
+panel running off the screen. Two root causes, fixed across every filter
+panel and tall dialog:
+
+- `max-h-[75vh]` → `max-h-[70dvh]`. `vh` ignores the mobile browser's
+  address bar, so the Apply button sat underneath it and was unreachable.
+- A fixed `w-96` popover is wider than a 360px phone. Now
+  `w-[calc(100vw-1rem)] sm:w-96`, with `collisionPadding` and a
+  `max-w-[calc(100vw-1rem)]` on the positioner so it can never overflow.
+
+Also: every dialog added today had an unprefixed `max-w-*`, which
+tailwind-merge resolves *over* the base `DialogContent`'s
+`max-w-[calc(100%-1rem)]` — so they rendered edge-to-edge with no gutter on
+a phone. All scoped to `sm:` so the base survives on small screens.
+
+> **Not verified in a browser.** The Chrome extension is not connected, so
+> the responsive work was done by reading the classes and reasoning about
+> the cascade, exactly as §4bis.19 was. The API behaviour above is all
+> confirmed against the running app; the layout is not confirmed on a real
+> device.
+
+> **A consequence worth stating:** `placementStatus = "PLACED"` set by hand
+> on a student record no longer makes them placed — only
+> `placementConfirmedAt` does. That column now carries the student's own
+> intent (seeking / not interested / opted out) and nothing else.
+
+---
+
+### 4bis.30 Cap corrected to an increment, and off-campus in the Offers pages — 2026-10-14
+
+**The cap rule was wrong.** §4bis.29 shipped a fixed floor and a multiplier.
+Neither is what a campus cap actually is: the bar is the student's **current
+package plus a step**. Hold 6 LPA with a 4 LPA step and you may only chase
+10 LPA and above.
+
+`INCREMENT` is now a third mode and the default. The other two stay — the
+TPO picks under Settings, since the brief was explicitly that nothing is
+hardcoded, and a college that genuinely wants an absolute floor should still
+be able to set one.
+
+The difference matters: a fixed floor treats a student on 3 LPA and one on
+12 LPA identically, while an increment moves the bar per student. The
+Settings form now shows a worked example that updates as the figure is
+typed, so a TPO can see which they are configuring before saving.
+
+Verified live, student holding ₹6L with a ₹4L step: drive at ₹8L blocked,
+₹9L blocked, ₹10L allowed, ₹15L allowed — with the message naming both
+figures, *"already placed at ₹6L ... only allows further applications at
+₹10L or above, and this drive offers ₹8L"*. 14 unit tests cover all three
+modes plus the cross-field variant of each.
+
+**Off-campus placements now appear in the Offers pages**, routed by type: an
+off-campus job under Job Offers, an off-campus internship under Internship
+Offers. They are a different model with no drive, so they are fetched
+separately and merged into the rows rather than forced through the Offer
+query.
+
+| | |
+|---|---|
+| Badge | Each off-campus row is labelled, because a campus offer and a self-found one mean very different things |
+| Filter | **Placed via** — any route / campus only / off-campus only |
+| Selection | Off-campus rows are deliberately **unselectable**: the bulk bar PATCHes `/api/offers/*`, which these are not |
+| Tabs | They appear only on All and Joined — the other tabs are Offer-lifecycle states (draft, issued, declined) an off-campus record has no equivalent of |
+| Link | The student name points at their profile, not `/offers/[id]`, which doesn't exist for these |
+
+**A joined milestone.** `OffCampusPlacement.joinedAt`, toggled from the
+student's Offers tab, mirroring the campus JOINED state so one lifecycle
+reads across both routes: recorded → verified → joined. Verified: marking
+joined put the row in the Joined tab; undoing removed it.
+
+Verified routing: `/offers` showed the off-campus job and not the
+internship; `/offers?type=internship` the reverse; `?source=offcampus`
+showed only off-campus rows; `?source=campus` none.
+
+> **A bug this surfaced in my own work.** §4bis.29 made placement a
+> confirmed decision in `lib/students/placement.ts`, but
+> `lib/dashboard/get-stat-cards.ts` and `lib/analytics/stats.ts` were still
+> deriving it from offers. A student confirmed placed without an accepted
+> offer showed as **Placed** on the roster and was **missing from the
+> dashboard** — 4 against the roster's 5. Both now count straight off
+> `placementConfirmedAt`. Caught because the dashboard disagreed with the
+> database during cleanup, not by design.
+
+---
+
+### 4bis.31 Off-campus visible everywhere it should be — 2026-10-14
+
+**The Students filter rendered as bare chevrons.** Department, Course, Batch
+and Placement status were `<SelectTrigger>` with no width. A trigger shrinks
+to its content and an unset filter has no content, so they collapsed to the
+arrow alone. Eight of them across two panels now carry `w-full`. Also caught
+a `max-h-[min(85vh,42rem)]` the §4bis.29 sweep missed, because the regex
+only matched a bare `max-h-[85vh]`.
+
+**The off-campus badge was trapped inside the placed branch.** §4bis.29 made
+an off-campus record stop implying placement, but the roster badge was still
+nested under `placementStatus === "PLACED"` — so the students it was built
+to surface were exactly the ones not showing it. It now renders
+independently, and a row reads **"Eligible · Off-campus internship"**, which
+is the combination a TPO most needs to spot.
+
+**The route badge moved to the Status column** on the Offers pages, from
+Type. That is where someone looks to answer "how is this student placed",
+and it now sits with the placement state: `Accepted · Off-campus job ·
+Marked placed`.
+
+**Mark placed, from the list.** An off-campus row that hasn't been confirmed
+shows a **Mark placed** button inline, so a TPO working down Job Offers acts
+on the evidence they are already reading instead of opening each profile.
+Once confirmed it becomes a **Marked placed** badge.
+
+**Analytics splits placements by route.** A stacked bar plus a legend:
+through a campus drive / both / off-campus / confirmed with nothing on file
+yet. "Both" is its own bucket rather than double-counted or arbitrarily
+assigned, and the fourth exists because a TPO can confirm a placement before
+any paperwork lands — folding those into "campus" would have been a quiet
+lie. The card states plainly that all of them count towards the one
+placement rate.
+
+Live reading during verification: campus 4 (66.7%), off-campus 1 (16.7%),
+nothing-on-file 1 (16.7%), all 6 inside a 13.3% rate.
+
+> **A formatting bug caught in testing:** an off-campus internship stores a
+> *monthly stipend*, and the Offers table ran it through the annual-CTC
+> formatter — ₹30,000/mo displayed as **"₹0.3L"**, which reads like a
+> derisory annual package. Off-campus internships now render as
+> `₹30,000/mo`.
+
+Verified: `/offers` showed the off-campus job and not the internship;
+`?type=internship` the reverse; both carried the badge and the action;
+marking placed from the list flipped the row; the roster showed the badge on
+an unplaced student.
+
+---
+
+### 4bis.32 A student with both an off-campus job and internship — 2026-10-14
+
+The roster badge read the student's **most recent** off-campus record and
+nothing else:
+
+```
+offCampus: s.offCampusPlacements[0] ? { type: ... } : null
+```
+
+So a student holding an off-campus internship *and* an off-campus job showed
+whichever was created last, and silently hid the other. Create the
+internship first and the job second, and their internship disappeared behind
+a badge reading **"Off-campus job"** — which is what was reported.
+
+Reproduced before fixing: Zara Kapoor given a Swiggy internship then a Zoho
+job showed one badge, "Off-campus job".
+
+The roster now derives **one badge per type held**, not per record — a
+student with three internships gets one "Off-campus internship" badge
+listing all three companies in its tooltip, and a student with both kinds
+gets both badges. After the fix the same student reads
+**"Eligible · Off-campus internship · Off-campus job"**.
+
+Verified across every surface: roster filters returned
+`INTERNSHIP` → 2, `JOB` → 1, `any` → 2 with the same student correctly in
+both type filters; `/offers` showed only the job, `?type=internship` only
+the two internships, each with the right badge and stipend formatting; the
+profile listed both records separately.
+
+> **Checked, not affected:** the Offers table and the profile's off-campus
+> card render one row *per record*, so their badges were always per-record
+> and correct. A repo-wide grep confirmed no other place takes
+> `offCampusPlacements[0]`.
+
+---
+
 ## 5. Known issues before production
 
 ### Blockers
