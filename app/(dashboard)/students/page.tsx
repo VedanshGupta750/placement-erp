@@ -76,6 +76,9 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   }
 
   const canCreate = await hasPermission(session, "student.create");
+  // Bulk account actions need both: the permission to edit a student and
+  // the permission to act on many at once.
+  const canBulkEdit = (await hasPermission(session, "student.edit")) && (await hasPermission(session, "student.bulk_update"));
   const db = getTenantDb(session.collegeId);
 
   // Kept separate from `where` (rather than spread into it) so a
@@ -235,7 +238,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const rows: StudentRow[] = students.map((s: {
     id: string;
     enrollmentNumber: string;
-    user: { name: string; email: string };
+    user: { name: string; email: string; status: string };
     course: { name: string; specialization: string | null };
     aggregate: number | null;
     tenthScore: number | null;
@@ -256,6 +259,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     liveBacklogs: s.liveBacklogs,
     eligibleForPlacements: s.eligibleForPlacements,
     placementStatus: effectivePlacementStatus(s.placementStatus, s.offers.length > 0),
+    accountStatus: s.user.status,
   }));
 
   return (
@@ -343,7 +347,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
                 </div>
               </div>
               <p className="text-muted-foreground mb-3 text-xs">{rows.length} of {filteredTotal} students shown</p>
-              <StudentsTable rows={rows} />
+              <StudentsTable rows={rows} canEdit={canBulkEdit} />
             </CardContent>
           </Card>
         </div>

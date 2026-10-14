@@ -7,8 +7,16 @@ import { notifyUsers } from "@/lib/notify";
 import { getStudentScopeWhere } from "@/lib/students/scope";
 import { computeMatchScore } from "@/lib/matching";
 import { recomputeDriveCounters } from "@/lib/drives/counters";
+import { requireNotSelfServiceStudent, StaffOnlyError } from "@/lib/students/guard";
 
-type BulkAction = "add_tag" | "change_status" | "send_message" | "assign_coordinator" | "add_to_drive";
+type BulkAction =
+  | "add_tag"
+  | "change_status"
+  | "send_message"
+  | "assign_coordinator"
+  | "add_to_drive"
+  | "suspend_accounts"
+  | "reactivate_accounts";
 
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -16,8 +24,12 @@ export async function POST(request: Request) {
 
   try {
     await requirePermission(session, "student.bulk_update");
+    // Students hold student.edit for their own /api/profile/* routes, and
+    // this endpoint takes an arbitrary list of ids — same vuln class as the
+    // Student 360 routes, so the same staff-only guard applies.
+    await requireNotSelfServiceStudent(db, session);
   } catch (e) {
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    if (e instanceof ForbiddenError || e instanceof StaffOnlyError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
     throw e;
   }
 
@@ -39,7 +51,7 @@ export async function POST(request: Request) {
   const scopeWhere = await getStudentScopeWhere(db, session);
   const students = await db.student.findMany({
     where: { id: { in: studentIds }, ...scopeWhere },
-    select: { id: true, tags: true, userId: true },
+    select: { id: true, tags: true, userId: true, user: { select: { name: true, email: true } } },
   });
   if (students.length === 0) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
@@ -150,6 +162,50 @@ export async function POST(request: Request) {
         `Added to ${drive.title}`,
         `You've been added to "${drive.title}" (${position.title}) by placement staff.`,
         "/applications",
+      );
+    }
+  } else if (action === "suspend_accounts" || action === "reactivate_accounts") {
+    // Account access, not placement policy: this flips User.status, which is
+    // what the login route checks. Student.placementStatus is a separate
+    // axis and deliberately left alone — a suspended account can still be
+    // "PLACED" in the records.
+    try {
+      await requirePermission(session, "student.edit");
+    } catch (e) {
+      if (e instanceof ForbiddenError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      throw e;
+    }
+    const suspend = action === "suspend_accounts";
+    const result = await db.user.updateMany({
+      where: { id: { in: students.map((s) => s.userId) } },
+      data: { status: suspend ? "SUSPENDED" : "ACTIVE" },
+    });
+    successCount = result.count;
+
+    // One entry per student rather than a single bulk line: "was this
+    // person's access cut off, and when" is the question the trail gets
+    // asked, and that has to be answerable per student.
+    for (const s of students) {
+      await recordAudit(db, {
+        collegeId: session.collegeId,
+        actorId: session.userId,
+        action: suspend ? "student.account_suspended" : "student.account_reactivated",
+        resourceType: "Student",
+        resourceId: s.id,
+        after: { accountStatus: suspend ? "SUSPENDED" : "ACTIVE", name: s.user.name, email: s.user.email },
+      });
+    }
+
+    if (!suspend) {
+      // Only worth telling someone whose access just came back.
+      await notifyUsers(
+        db,
+        session.collegeId,
+        students.map((s) => s.userId),
+        "student.account_reactivated",
+        "Your account has been reactivated",
+        "Your placement portal access has been restored. You can sign in as usual.",
+        "/dashboard",
       );
     }
   } else {

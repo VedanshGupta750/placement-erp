@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase } from "lucide-react";
+import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,20 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 type Coordinator = { id: string; name: string; title: string; departmentName: string };
 type Drive = { id: string; title: string; companyName: string; positions: { id: string; title: string }[] };
 
-export function BulkActionsBar({ studentIds, onDone }: { studentIds: string[]; onDone: () => void }) {
+export function BulkActionsBar({
+  studentIds,
+  onDone,
+  canEdit,
+  selectableCount,
+  onSelectAll,
+}: {
+  studentIds: string[];
+  onDone: () => void;
+  canEdit: boolean;
+  /** Rows currently loaded, for the "select all N" shortcut. */
+  selectableCount: number;
+  onSelectAll: () => void;
+}) {
   const router = useRouter();
   const [tagOpen, setTagOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -31,6 +44,8 @@ export function BulkActionsBar({ studentIds, onDone }: { studentIds: string[]; o
   const [driveId, setDriveId] = useState("");
   const [positionId, setPositionId] = useState("");
   const [pending, setPending] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
+  const [reactivateOpen, setReactivateOpen] = useState(false);
 
   useEffect(() => {
     if (!coordOpen || coordinators.length > 0) return;
@@ -70,7 +85,14 @@ export function BulkActionsBar({ studentIds, onDone }: { studentIds: string[]; o
 
   return (
     <div className="bg-accent/60 flex flex-col gap-2 rounded-lg border px-3 py-2 sm:flex-row sm:items-center">
-      <span className="shrink-0 text-sm font-medium">{studentIds.length} selected</span>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-sm font-medium">{studentIds.length} selected</span>
+        {studentIds.length < selectableCount && (
+          <button type="button" onClick={onSelectAll} className="text-primary text-xs hover:underline">
+            Select all {selectableCount}
+          </button>
+        )}
+      </div>
       <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 sm:ml-auto sm:pb-0">
         <Dialog open={tagOpen} onOpenChange={setTagOpen}>
           <DialogTrigger render={<Button variant="outline" size="sm" />}>
@@ -212,6 +234,67 @@ export function BulkActionsBar({ studentIds, onDone }: { studentIds: string[]; o
           <Button variant="outline" size="sm" render={<Link href={`/students/compare?ids=${studentIds.join(",")}`} />}>
             <GitCompare className="size-3.5" /> Compare
           </Button>
+        )}
+
+        {canEdit && (
+          <>
+            <Dialog open={suspendOpen} onOpenChange={setSuspendOpen}>
+              <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                <UserX className="size-3.5" /> Suspend
+              </DialogTrigger>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>
+                    Suspend {studentIds.length} student{studentIds.length === 1 ? "" : "s"}?
+                  </DialogTitle>
+                </DialogHeader>
+                <p className="text-muted-foreground text-sm">
+                  They won&apos;t be able to sign in until the account is reactivated. Their records, applications and
+                  offers are untouched, and nothing is sent to them. Reversible at any time.
+                </p>
+                <DialogFooter>
+                  <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+                  <Button
+                    variant="destructive"
+                    disabled={pending}
+                    onClick={async () => {
+                      if (await run("suspend_accounts", {})) setSuspendOpen(false);
+                    }}
+                  >
+                    {pending ? "Suspending…" : "Suspend accounts"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={reactivateOpen} onOpenChange={setReactivateOpen}>
+              <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                <UserCheck className="size-3.5" /> Reactivate
+              </DialogTrigger>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>
+                    Reactivate {studentIds.length} student{studentIds.length === 1 ? "" : "s"}?
+                  </DialogTitle>
+                </DialogHeader>
+                <p className="text-muted-foreground text-sm">
+                  Sign-in access is restored and each student is notified. Students who were already active are
+                  unaffected.
+                </p>
+                <DialogFooter>
+                  <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+                  <Button
+                    disabled={pending}
+                    onClick={async () => {
+                      if (await run("reactivate_accounts", {})) setReactivateOpen(false);
+                    }}
+                  >
+                    {pending ? "Reactivating…" : "Reactivate accounts"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
 
         <button type="button" onClick={onDone} className="text-muted-foreground hover:text-foreground" aria-label="Clear selection">

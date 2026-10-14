@@ -20,14 +20,25 @@ export type StudentRow = {
   liveBacklogs: number;
   eligibleForPlacements: boolean;
   placementStatus: string;
+  /** User.status — account access, independent of placementStatus. */
+  accountStatus: string;
 };
 
-export function StudentsTable({ rows }: { rows: StudentRow[] }) {
+export function StudentsTable({
+  rows,
+  canEdit = false,
+}: {
+  rows: StudentRow[];
+  canEdit?: boolean;
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const allSelected = rows.length > 0 && selected.size === rows.length;
 
   function toggleAll() {
     setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
+  }
+  function selectAll() {
+    setSelected(new Set(rows.map((r) => r.id)));
   }
   function toggleOne(id: string) {
     setSelected((prev) => {
@@ -44,6 +55,9 @@ export function StudentsTable({ rows }: { rows: StudentRow[] }) {
         <BulkActionsBar
           studentIds={[...selected]}
           onDone={() => setSelected(new Set())}
+          canEdit={canEdit}
+          selectableCount={rows.length}
+          onSelectAll={selectAll}
         />
       )}
       <div className="overflow-x-auto">
@@ -70,7 +84,12 @@ export function StudentsTable({ rows }: { rows: StudentRow[] }) {
                 </TableCell>
                 <TableCell className="font-mono text-xs">{r.enrollmentNumber}</TableCell>
                 <TableCell>
-                  <Link href={`/students/${r.id}`} className="font-medium hover:underline">{r.name}</Link>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Link href={`/students/${r.id}`} className="font-medium hover:underline">{r.name}</Link>
+                    {r.accountStatus === "SUSPENDED" && (
+                      <Badge variant="outline" className="text-destructive border-destructive/40">Suspended</Badge>
+                    )}
+                  </div>
                   <div className="text-muted-foreground text-xs">{r.email}</div>
                 </TableCell>
                 <TableCell className="text-sm">{r.courseLabel}</TableCell>
