@@ -8,24 +8,24 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/dashboard/status-badge";
+import { EditOfferDialog, type EditableOffer } from "@/components/offers/edit-offer-dialog";
 import { toast } from "sonner";
 
 type SelectedApplicant = { id: string; student: { user: { name: string } } };
-type Offer = {
-  id: string;
-  status: string;
-  totalCompensation: unknown;
-  student: { user: { name: string } };
-};
+// Extends the editable shape rather than redeclaring the money fields, so
+// the panel and the dialog can't drift apart on what an offer carries.
+type Offer = EditableOffer & { student: { user: { name: string } } };
 
 export function OffersPanel({
   driveId,
   offers,
   selectedWithoutOffer,
+  canEditOffer = false,
 }: {
   driveId: string;
   offers: Offer[];
   selectedWithoutOffer: SelectedApplicant[];
+  canEditOffer?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -117,13 +117,20 @@ export function OffersPanel({
         </CardHeader>
         <CardContent className="flex flex-col divide-y">
           {offers.map((o) => (
-            <div key={o.id} className="flex items-center justify-between py-2.5">
+            <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
               <div>
                 <div className="font-medium">{o.student.user.name}</div>
-                <div className="text-muted-foreground text-xs">₹{(Number(o.totalCompensation as string) / 100000).toFixed(1)}L</div>
+                <div className="text-muted-foreground text-xs">
+                  ₹{(Number(o.totalCompensation) / 100000).toFixed(1)}L · {o.offerType.replace("_", " ").toLowerCase()}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <StatusBadge status={o.status} />
+                {/* Draft only — the server refuses an edit once the student
+                    has been shown the figures, so the button matches. */}
+                {canEditOffer && o.status === "DRAFT" && (
+                  <EditOfferDialog offer={o} studentName={o.student.user.name} />
+                )}
                 {o.status === "DRAFT" && (
                   <Button size="sm" disabled={pending} onClick={() => issue(o.id)}>Issue to student</Button>
                 )}

@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth/session";
 import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { editOfferSchema } from "@/lib/validators/offer";
+import { recordAudit } from "@/lib/audit";
 
 // Staff-side actions on an offer — deliberately a SEPARATE route from
 // PATCH /api/offers/[id], which is the student's own self-service
@@ -32,6 +33,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "invalid_transition", message: "Only a draft or issued offer can be withdrawn." }, { status: 409 });
     }
     await db.offer.update({ where: { id }, data: { status: "WITHDRAWN", withdrawnAt: new Date() } });
+    await recordAudit(db, {
+      collegeId: session.collegeId,
+      actorId: session.userId,
+      action: "offer.withdrawn",
+      resourceType: "Offer",
+      resourceId: id,
+      after: { previousStatus: offer.status, studentId: offer.studentId, driveId: offer.driveId },
+    });
     return NextResponse.json({ ok: true });
   }
 
@@ -60,6 +69,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         stipend: data.stipend,
         joiningBonus: data.joiningBonus,
         joiningDate: data.joiningDate ? new Date(data.joiningDate) : undefined,
+      },
+    });
+
+    // Compensation is the single most consequential number in the module and
+    // it was previously editable with no trace at all. Both sides are kept:
+    // "the package changed" is only answerable with what it changed FROM.
+    await recordAudit(db, {
+      collegeId: session.collegeId,
+      actorId: session.userId,
+      action: "offer.edited",
+      resourceType: "Offer",
+      resourceId: id,
+      after: {
+        before: {
+          offerType: offer.offerType,
+          totalCompensation: offer.totalCompensation.toString(),
+          fixedCompensation: offer.fixedCompensation?.toString() ?? null,
+          variableCompensation: offer.variableCompensation?.toString() ?? null,
+          stipend: offer.stipend?.toString() ?? null,
+          joiningBonus: offer.joiningBonus?.toString() ?? null,
+          joiningDate: offer.joiningDate?.toISOString() ?? null,
+        },
+        changes: data,
       },
     });
     return NextResponse.json({ ok: true });

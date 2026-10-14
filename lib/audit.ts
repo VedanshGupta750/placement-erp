@@ -30,6 +30,8 @@ export const AUDIT_LABELS: Record<string, string> = {
   "student.document_uploaded": "Document uploaded",
   "student.document_verified": "Document verified",
   "student.bulk_action": "Bulk action performed",
+  "offer.edited": "Offer edited",
+  "offer.withdrawn": "Offer withdrawn",
   "student.password_reset": "Password reset",
   "student.deleted": "Student deleted",
   "student.account_suspended": "Student account suspended",

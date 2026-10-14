@@ -112,9 +112,10 @@ export default async function DriveDetailPage({
     },
   });
   if (!drive) notFound();
-  const [canEditDrive, canMarkJoined, canOverrideEligibility, conversations, allSkills, eligibilityOverrides, activeOverrides] = await Promise.all([
+  const [canEditDrive, canMarkJoined, canEditOffer, canOverrideEligibility, conversations, allSkills, eligibilityOverrides, activeOverrides] = await Promise.all([
     hasPermission(session, "drive.edit"),
     hasPermission(session, "offer.mark_joined"),
+    hasPermission(session, "offer.edit"),
     hasPermission(session, "eligibility.override"),
     db.conversation.findMany({ where: { driveId: id }, orderBy: { createdAt: "desc" } }),
     db.skill.findMany({ orderBy: { name: "asc" } }),
@@ -401,8 +402,22 @@ export default async function DriveDetailPage({
         <TabsContent value="offers" className="mt-4">
           <OffersPanel
             driveId={drive.id}
-            offers={drive.offers.map((o) => ({ id: o.id, status: o.status, totalCompensation: o.totalCompensation.toString(), student: o.student }))}
+            // Decimal and Date don't survive the server/client boundary, so
+            // every money field is stringified and the date sent as ISO.
+            offers={drive.offers.map((o) => ({
+              id: o.id,
+              status: o.status,
+              offerType: o.offerType,
+              totalCompensation: o.totalCompensation.toString(),
+              fixedCompensation: o.fixedCompensation?.toString() ?? null,
+              variableCompensation: o.variableCompensation?.toString() ?? null,
+              stipend: o.stipend?.toString() ?? null,
+              joiningBonus: o.joiningBonus?.toString() ?? null,
+              joiningDate: o.joiningDate ? o.joiningDate.toISOString() : null,
+              student: o.student,
+            }))}
             selectedWithoutOffer={selectedWithoutOffer}
+            canEditOffer={canEditOffer}
           />
         </TabsContent>
 
