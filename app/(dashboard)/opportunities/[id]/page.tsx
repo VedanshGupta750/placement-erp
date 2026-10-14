@@ -47,8 +47,12 @@ export default async function OpportunityDetailPage({ params }: { params: Promis
   if (!VISIBLE_STATUSES.includes(drive.status) && applications.length === 0) notFound();
   if (!isEligibleCourse && applications.length === 0) notFound();
 
+  // Only resumes with a file behind them count as applyable. Resume rows
+  // can exist with fileId NULL (older seed/expand scripts made some), and
+  // such a row is useless to the company — the apply form treats "no
+  // resume with a file" as "no resume" and sends the student to upload one.
   const resumes = await db.resume.findMany({
-    where: { studentId: student.id },
+    where: { studentId: student.id, fileId: { not: null } },
     orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
   });
 

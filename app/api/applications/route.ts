@@ -45,11 +45,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "registration_closed", message: "Registration for this drive has closed." }, { status: 409 });
   }
 
-  if (resumeId) {
-    const resume = await db.resume.findUnique({ where: { id: resumeId } });
-    if (!resume || resume.studentId !== student.id) {
-      return NextResponse.json({ error: "invalid_resume", message: "Select a valid resume." }, { status: 400 });
-    }
+  // The resume is mandatory and must be a real, downloadable file. Three
+  // separate things are checked because they fail differently:
+  //   - not found / not theirs -> someone editing the request by hand
+  //   - no file attached       -> a Resume row can exist with fileId NULL
+  //     (the older seed/expand scripts created some), and those are
+  //     invisible to the recruiter and skipped by the drive resume ZIP
+  const resume = await db.resume.findUnique({ where: { id: resumeId }, select: { studentId: true, fileId: true } });
+  if (!resume || resume.studentId !== student.id) {
+    return NextResponse.json({ error: "invalid_resume", message: "Select a valid resume." }, { status: 400 });
+  }
+  if (!resume.fileId) {
+    return NextResponse.json(
+      {
+        error: "resume_has_no_file",
+        message: "That resume has no file attached. Upload it again from the Resumes page before applying.",
+      },
+      { status: 400 },
+    );
   }
 
   const validFieldIds = new Set(drive.applicationFields.map((f) => f.id));
@@ -73,7 +86,7 @@ export async function POST(request: Request) {
           studentId: student.id,
           driveId,
           positionId,
-          resumeId: resumeId ?? undefined,
+          resumeId,
           status: "APPLIED",
           matchScore,
           matchedSkills,
@@ -83,9 +96,7 @@ export async function POST(request: Request) {
           },
         },
       });
-      if (resumeId) {
-        await tx.resumeUsage.create({ data: { resumeId, driveId, applicationId: app.id } });
-      }
+      await tx.resumeUsage.create({ data: { resumeId, driveId, applicationId: app.id } });
       if (validFieldValues.length > 0) {
         await tx.applicationFieldValue.createMany({
           data: validFieldValues.map((v) => ({ applicationId: app.id, fieldId: v.fieldId, value: v.value })),
