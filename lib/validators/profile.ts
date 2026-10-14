@@ -8,8 +8,9 @@ export const updateUserProfileSchema = z.object({
 export type UpdateUserProfileInput = z.infer<typeof updateUserProfileSchema>;
 
 export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, "Current password is required."),
-  newPassword: z.string().min(8, "New password must be at least 8 characters."),
+  // Trimmed to match how it was stored — see lib/validators/auth.ts.
+  currentPassword: z.string().trim().min(1, "Current password is required."),
+  newPassword: z.string().trim().min(8, "New password must be at least 8 characters."),
 });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 

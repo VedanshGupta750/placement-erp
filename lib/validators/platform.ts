@@ -6,7 +6,8 @@ import { passwordStrengthSchema } from "@/lib/validators/auth";
 
 export const platformLoginSchema = z.object({
   email: z.email("Enter a valid email address.").trim(),
-  password: z.string().min(1, "Password is required."),
+  // Same normalisation as lib/validators/auth.ts — see the note there.
+  password: z.string().trim().min(1, "Password is required."),
 });
 export type PlatformLoginInput = z.infer<typeof platformLoginSchema>;
 
