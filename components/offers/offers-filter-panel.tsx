@@ -13,7 +13,7 @@ type Drive = { id: string; title: string; companyName: string };
 type Department = { id: string; name: string };
 
 const STATUS_OPTIONS = ["DRAFT", "ISSUED", "ACCEPTED", "DECLINED", "JOINING_PENDING", "JOINED", "DID_NOT_JOIN", "WITHDRAWN"];
-const FILTER_KEYS = ["driveId", "status", "offerType", "departmentId", "minCtc", "maxCtc", "offeredFrom", "offeredTo"];
+const FILTER_KEYS = ["driveId", "status", "offerType", "source", "departmentId", "minCtc", "maxCtc", "offeredFrom", "offeredTo"];
 
 export function OffersFilterPanel({ drives, departments }: { drives: Drive[]; departments: Department[] }) {
   const router = useRouter();
@@ -57,8 +57,8 @@ export function OffersFilterPanel({ drives, departments }: { drives: Drive[]; de
           </Button>
         }
       />
-      <PopoverContent align="end" className="w-96 p-4">
-        <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto">
+      <PopoverContent align="end" className="w-[calc(100vw-1rem)] sm:w-96 p-4">
+        <form onSubmit={handleSubmit} className="flex max-h-[75dvh] flex-col gap-4 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             <Label>Drive</Label>
             <Select name="driveId" defaultValue={searchParams.get("driveId") ?? undefined}>
@@ -94,6 +94,23 @@ export function OffersFilterPanel({ drives, departments }: { drives: Drive[]; de
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Placed via</Label>
+            {/* Lets a TPO pull up just the students who found their own
+                job or internship, or hide them to see campus drives alone. */}
+            <Select name="source" defaultValue={searchParams.get("source") ?? undefined}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Any route">
+                  {(v: string) => (v === "campus" ? "Campus drives only" : v === "offcampus" ? "Off-campus only" : "Any route")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="campus">Campus drives only</SelectItem>
+                <SelectItem value="offcampus">Off-campus only</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex flex-col gap-1.5">

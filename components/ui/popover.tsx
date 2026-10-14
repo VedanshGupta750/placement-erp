@@ -32,7 +32,12 @@ function PopoverContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="isolate z-50"
+        // collisionPadding keeps the panel off the viewport edge, and
+        // collisionAvoidance lets it shrink rather than overflow. Without
+        // these a tall filter panel on a phone ran off the bottom of the
+        // screen with its footer unreachable.
+        collisionPadding={8}
+        className="isolate z-50 max-w-[calc(100vw-1rem)]"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"

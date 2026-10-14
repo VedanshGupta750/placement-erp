@@ -114,7 +114,7 @@ export function EvaluateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Evaluate interview</DialogTitle></DialogHeader>
-        <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
+        <div className="flex max-h-[70dvh] flex-col gap-3 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             <Label>Result</Label>
             <div className="flex gap-2">

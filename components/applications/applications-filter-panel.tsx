@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 
 type Drive = { id: string; title: string; companyName: string };
 type Department = { id: string; name: string };
@@ -17,9 +18,21 @@ type Company = { id: string; name: string };
 
 const STATUS_OPTIONS = ["APPLIED", "COLLEGE_APPROVED", "SCREENING", "SHORTLISTED", "ROUND_IN_PROGRESS", "SELECTED", "REJECTED", "WITHDRAWN"];
 
-const FILTER_KEYS = ["driveId", "companyId", "status", "departmentId", "courseId", "appliedFrom", "appliedTo",
-  "minBacklogs", "maxBacklogs", "minCgpa", "maxCgpa", "minTenth", "minTwelfth", "placement", "excludePlaced",
-  "priority", "hasOffer"];
+// Every key the panel owns. Used for the active-count badge, for "Clear all",
+// AND for submitting — they were three different lists before, which is how
+// seven filters ended up unreachable (see SUBMIT_KEYS note below).
+const FILTER_KEYS = [
+  "driveId", "companyId", "status", "departmentId", "courseId",
+  "appliedFrom", "appliedTo", "minBacklogs", "maxBacklogs",
+  "minCgpa", "maxCgpa", "minTenth", "minTwelfth",
+  "placement", "excludePlaced", "priority", "hasOffer",
+];
+
+// Text/number/date/select inputs read straight from FormData. The two
+// checkbox-style keys are handled separately below.
+const SUBMIT_KEYS = FILTER_KEYS.filter((k) => k !== "excludePlaced" && k !== "hasOffer");
+
+const splitParam = (v: string | null) => (v ? v.split(",").filter(Boolean) : []);
 
 export function ApplicationsFilterPanel({ drives, departments, courses, companies }: {
   drives: Drive[];
@@ -38,13 +51,25 @@ export function ApplicationsFilterPanel({ drives, departments, courses, companie
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const params = new URLSearchParams(searchParams.toString());
-    for (const key of ["driveId", "status", "departmentId", "courseId", "appliedFrom", "appliedTo", "minBacklogs", "maxBacklogs", "priority"]) {
+
+    // Previously this looped over a hardcoded subset that omitted companyId,
+    // minCgpa, maxCgpa, minTenth, minTwelfth and placement — so those six
+    // controls rendered, accepted input, and silently did nothing because
+    // the value never reached the URL the page reads. Derived from
+    // FILTER_KEYS now so a new filter can't be added and left inert.
+    for (const key of SUBMIT_KEYS) {
       const v = fd.get(key);
       if (v && String(v).trim()) params.set(key, String(v));
       else params.delete(key);
     }
-    if (fd.get("hasOffer") === "on") params.set("hasOffer", "1");
-    else params.delete("hasOffer");
+
+    for (const key of ["excludePlaced", "hasOffer"]) {
+      if (fd.get(key) === "on" || fd.get(key) === "1") params.set(key, "1");
+      else params.delete(key);
+    }
+
+    // A filter change invalidates the page cursor, and the status tab is a
+    // separate control — leave it alone.
     router.push(`${pathname}?${params.toString()}`);
     setOpen(false);
   }
@@ -70,68 +95,45 @@ export function ApplicationsFilterPanel({ drives, departments, courses, companie
           </Button>
         }
       />
-      <PopoverContent align="end" className="w-96 p-4">
-        <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto">
-          <div className="flex flex-col gap-1.5">
-            <Label>Company</Label>
-            <Select name="companyId" defaultValue={searchParams.get("companyId") ?? undefined}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
-              <SelectContent>
-                {companies.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <PopoverContent align="end" className="w-[calc(100vw-1rem)] p-4 sm:w-96">
+        <form onSubmit={handleSubmit} className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto overscroll-contain">
+          <MultiSelectFilter
+            label="Company"
+            name="companyId"
+            options={companies.map((c) => ({ value: c.id, label: c.name }))}
+            initialSelected={splitParam(searchParams.get("companyId"))}
+            searchable={companies.length > 12}
+          />
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Drive</Label>
-            <Select name="driveId" defaultValue={searchParams.get("driveId") ?? undefined}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
-              <SelectContent>
-                {drives.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>{d.companyName} — {d.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <MultiSelectFilter
+            label="Drive"
+            name="driveId"
+            options={drives.map((d) => ({ value: d.id, label: `${d.companyName} — ${d.title}` }))}
+            initialSelected={splitParam(searchParams.get("driveId"))}
+            searchable={drives.length > 12}
+          />
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Status</Label>
-            <Select name="status" defaultValue={searchParams.get("status") ?? undefined}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>{s.replaceAll("_", " ")}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <MultiSelectFilter
+            label="Status"
+            name="status"
+            options={STATUS_OPTIONS.map((s) => ({ value: s, label: s.replaceAll("_", " ") }))}
+            initialSelected={splitParam(searchParams.get("status"))}
+          />
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Department</Label>
-              <Select name="departmentId" defaultValue={searchParams.get("departmentId") ?? undefined}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
-                <SelectContent>
-                  {departments.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Course</Label>
-              <Select name="courseId" defaultValue={searchParams.get("courseId") ?? undefined}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
-                <SelectContent>
-                  {courses.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.specialization ?? c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <MultiSelectFilter
+            label="Department"
+            name="departmentId"
+            options={departments.map((d) => ({ value: d.id, label: d.name }))}
+            initialSelected={splitParam(searchParams.get("departmentId"))}
+          />
+
+          <MultiSelectFilter
+            label="Course"
+            name="courseId"
+            options={courses.map((c) => ({ value: c.id, label: c.specialization ?? c.name }))}
+            initialSelected={splitParam(searchParams.get("courseId"))}
+            searchable={courses.length > 12}
+          />
 
           <div className="flex flex-col gap-2">
             <Label className="text-muted-foreground text-xs tracking-wide uppercase">Applied date range</Label>
@@ -179,7 +181,11 @@ export function ApplicationsFilterPanel({ drives, departments, courses, companie
             <div className="flex flex-col gap-1.5">
               <Label>Placement status</Label>
               <Select name="placement" defaultValue={searchParams.get("placement") ?? undefined}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Any">
+                    {(v: string) => (v === "placed" ? "Already placed" : v === "unplaced" ? "Not yet placed" : "Any")}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="placed">Already placed</SelectItem>
                   <SelectItem value="unplaced">Not yet placed</SelectItem>
@@ -200,7 +206,11 @@ export function ApplicationsFilterPanel({ drives, departments, courses, companie
           <div className="flex flex-col gap-1.5">
             <Label>Priority</Label>
             <Select name="priority" defaultValue={searchParams.get("priority") ?? undefined}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Any">
+                  {(v: string) => (v ? v.charAt(0) + v.slice(1).toLowerCase() : "Any")}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="NORMAL">Normal</SelectItem>
                 <SelectItem value="HIGH">High</SelectItem>
@@ -209,7 +219,7 @@ export function ApplicationsFilterPanel({ drives, departments, courses, companie
             </Select>
           </div>
 
-          <div className="flex justify-between gap-2">
+          <div className="bg-background sticky bottom-0 flex justify-between gap-2 border-t pt-3">
             <Button type="button" variant="ghost" size="sm" onClick={clearAll}>
               <X className="size-3.5" /> Clear all
             </Button>

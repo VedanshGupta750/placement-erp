@@ -65,7 +65,7 @@ export function NetworkFilterPanel({ courses, batches, departments, skills }: { 
         }
       />
       <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-4">
-        <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="flex max-h-[75dvh] flex-col gap-4 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             <Label>Member type</Label>
             <Select name="userType" defaultValue={searchParams.get("userType") ?? undefined}>

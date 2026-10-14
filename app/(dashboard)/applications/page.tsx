@@ -16,7 +16,7 @@ import { ApplicationsOverviewChart } from "@/components/applications/application
 import { DriveWisePanel } from "@/components/applications/drive-wise-panel";
 import { AddApplicationDialog } from "@/components/applications/add-application-dialog";
 import { getApplicationListStats, getDriveWiseApplicationCounts, getApplicationFunnel } from "@/lib/applications/stats";
-import { placedStudentWhere, notPlacedStudentWhere, PLACED_OFFER_STATUSES } from "@/lib/students/placement";
+import { placedStudentWhere, notPlacedStudentWhere, PLACED_OFFER_STATUSES, andStudentWhere } from "@/lib/students/placement";
 import { ApplicationFunnel } from "@/components/applications/application-funnel";
 import { ApplicationFlagsPanel } from "@/components/applications/application-flags-panel";
 import { getApplicationFlags } from "@/lib/applications/flags";
@@ -77,11 +77,22 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
         { position: { title: { contains: params.q, mode: "insensitive" } } },
       ];
     }
-    if (params.driveId) where.driveId = params.driveId;
-    if (params.status) where.status = params.status;
+    // These five accept several values at once (the filter panel renders
+    // them as checkbox lists), passed as a comma-joined query parameter.
+    // A single value still produces a one-element `in`, which Prisma treats
+    // exactly like equality.
+    const many = (v: string | undefined) => (v ? v.split(",").filter(Boolean) : []);
+    const driveIds = many(params.driveId);
+    const companyIds = many(params.companyId);
+    const statuses = many(params.status);
+    const departmentIds = many(params.departmentId);
+    const courseIds = many(params.courseId);
+
+    if (driveIds.length) where.driveId = { in: driveIds };
+    if (statuses.length) where.status = { in: statuses };
     else if (activeTabDef.statuses) where.status = { in: activeTabDef.statuses };
-    if (params.departmentId) where.student = { ...(where.student as object), departmentId: params.departmentId };
-    if (params.courseId) where.student = { ...(where.student as object), courseId: params.courseId };
+    if (departmentIds.length) where.student = { ...(where.student as object), departmentId: { in: departmentIds } };
+    if (courseIds.length) where.student = { ...(where.student as object), courseId: { in: courseIds } };
     if (params.minBacklogs || params.maxBacklogs) {
       where.student = {
         ...(where.student as object),
@@ -97,7 +108,7 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
         ...(params.appliedTo ? { lte: new Date(`${params.appliedTo}T23:59:59`) } : {}),
       };
     }
-    if (params.companyId) where.drive = { ...(where.drive as object), companyId: params.companyId };
+    if (companyIds.length) where.drive = { ...(where.drive as object), companyId: { in: companyIds } };
     if (params.minCgpa || params.maxCgpa) {
       where.student = {
         ...(where.student as object),
@@ -119,9 +130,9 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
     // one-click version of placement=unplaced, kept separate so a TPO can
     // switch it on without losing whatever placement filter they'd set.
     if (params.placement === "placed") {
-      where.student = { ...(where.student as object), ...placedStudentWhere };
+      where.student = andStudentWhere({ ...(where.student as object) }, placedStudentWhere);
     } else if (params.placement === "unplaced" || params.excludePlaced === "1") {
-      where.student = { ...(where.student as object), ...notPlacedStudentWhere };
+      where.student = andStudentWhere({ ...(where.student as object) }, notPlacedStudentWhere);
     }
     if (params.priority) where.priority = params.priority;
     if (params.hasOffer === "1") where.offer = { isNot: null };
@@ -132,6 +143,11 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
     const activeBatchId = await getActiveBatchId();
     if (activeBatchId) where.student = { ...(where.student as object), batchId: activeBatchId };
 
+    // Everything except the status/tab constraint — see the note on the
+    // stats calls below for why that distinction matters.
+    const statusAgnosticWhere = { ...where };
+    delete statusAgnosticWhere.status;
+
     const [applications, stats, driveWise, funnel, flags, drives, departments, courses, companies] = await Promise.all([
       db.application.findMany({
         where,
@@ -139,10 +155,17 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
         orderBy: { appliedAt: "desc" },
         take: 200,
       }),
-      getApplicationListStats(db, where),
-      getDriveWiseApplicationCounts(db, where, 5),
-      getApplicationFunnel(db, where),
-      getApplicationFlags(db, where),
+      // The summary cards and the funnel are a BREAKDOWN of the filtered
+      // population, so they get the filters WITHOUT the status constraint.
+      // Passing the full `where` made them contradict themselves: each card
+      // overrides `status` for its own bucket, so on the Shortlisted tab the
+      // header read "Total Applications 0" directly above "In Progress 2".
+      // Total now means "applications matching your filters", and each card
+      // is a real share of it.
+      getApplicationListStats(db, statusAgnosticWhere),
+      getDriveWiseApplicationCounts(db, statusAgnosticWhere, 5),
+      getApplicationFunnel(db, statusAgnosticWhere),
+      getApplicationFlags(db, statusAgnosticWhere),
       db.drive.findMany({ where: activeBatchId ? { batchId: activeBatchId } : {}, select: { id: true, title: true, company: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       db.department.findMany({ orderBy: { name: "asc" } }),
       db.course.findMany({ orderBy: { name: "asc" } }),
@@ -279,8 +302,22 @@ export default async function ApplicationsPage({ searchParams }: { searchParams:
 
             <Card>
               <CardContent className="overflow-x-auto pt-6">
+                {/* Names the status tab explicitly. "0 of 4" with no
+                    explanation was the confusing part: the filters matched
+                    4 applications, none of which were in the open tab, and
+                    nothing on screen said so. */}
                 <p className="text-muted-foreground mb-3 text-xs">
-                  {applications.length} application{applications.length === 1 ? "" : "s"}{activeFilterCount > 0 ? " matching filters" : ""} shown of {stats.total} total.
+                  {applications.length} application{applications.length === 1 ? "" : "s"} shown
+                  {activeTab !== "all" ? ` in ${activeTabDef.label}` : ""} of {stats.total}
+                  {activeFilterCount > 0 ? " matching your filters" : " total"}.
+                  {applications.length === 0 && stats.total > 0 && activeTab !== "all" && (
+                    <>
+                      {" "}
+                      <Link href={hrefWith({ tab: undefined })} className="text-primary hover:underline">
+                        Show all statuses
+                      </Link>
+                    </>
+                  )}
                 </p>
                 <ApplicationsTable rows={rows} />
               </CardContent>

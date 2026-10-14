@@ -102,8 +102,8 @@ export function DrivesFilterPanel({ companies, courses, departments, staff }: { 
           </Button>
         }
       />
-      <PopoverContent align="end" className="w-96 p-4">
-        <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto">
+      <PopoverContent align="end" className="w-[calc(100vw-1rem)] sm:w-96 p-4">
+        <form onSubmit={handleSubmit} className="flex max-h-[75dvh] flex-col gap-4 overflow-y-auto">
           <div className="flex flex-col gap-1.5">
             <Label>Status</Label>
             <Select name="status" defaultValue={searchParams.get("status") ?? undefined}>

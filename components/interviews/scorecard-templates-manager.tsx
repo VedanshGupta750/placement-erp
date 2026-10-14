@@ -71,7 +71,7 @@ export function ScorecardTemplatesManager({ templates, roundTypes }: { templates
           <DialogTrigger render={<Button size="sm" />}><Plus className="size-3.5" /> New scorecard</DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle>New scorecard template</DialogTitle></DialogHeader>
-            <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
+            <div className="flex max-h-[70dvh] flex-col gap-3 overflow-y-auto">
               <Input value={roundType} onChange={(e) => setRoundType(e.target.value)} placeholder="Round type (e.g. Technical, HR, Managerial)" list="round-types" />
               <datalist id="round-types">
                 {roundTypes.map((r) => <option key={r} value={r} />)}

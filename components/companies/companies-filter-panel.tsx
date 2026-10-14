@@ -58,7 +58,7 @@ export function CompaniesFilterPanel({ industries }: { industries: string[] }) {
           <div className="flex flex-col gap-1.5">
             <Label>Status</Label>
             <Select name="status" defaultValue={searchParams.get("status") ?? undefined}>
-              <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
               <SelectContent>
                 {Object.entries(PARTNERSHIP_STATUS_LABELS).map(([value, label]) => (
                   <SelectItem key={value} value={value}>{label}</SelectItem>
@@ -69,7 +69,7 @@ export function CompaniesFilterPanel({ industries }: { industries: string[] }) {
           <div className="flex flex-col gap-1.5">
             <Label>Industry</Label>
             <Select name="industryType" defaultValue={searchParams.get("industryType") ?? undefined}>
-              <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
               <SelectContent>
                 {industries.map((i) => (
                   <SelectItem key={i} value={i}>{i}</SelectItem>
@@ -80,7 +80,7 @@ export function CompaniesFilterPanel({ industries }: { industries: string[] }) {
           <div className="flex flex-col gap-1.5">
             <Label>Hiring type</Label>
             <Select name="hiringType" defaultValue={searchParams.get("hiringType") ?? undefined}>
-              <SelectTrigger><SelectValue placeholder="Any" /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Any" /></SelectTrigger>
               <SelectContent>
                 {HIRING_TYPES.map((t) => (
                   <SelectItem key={t} value={t}>{t}</SelectItem>
