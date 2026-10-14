@@ -1,105 +1,227 @@
-// "Forecasts" here means a real pipeline-conversion projection, not a
-// time-series prediction — this college's data doesn't support the latter
-// honestly (see the commit message: every seeded offer has the same
-// creation date, so there's no real day-by-day trend to extrapolate from,
-// and inventing one would be exactly the kind of fake number this app has
-// avoided everywhere else). Instead: compute this season's REAL observed
-// conversion rates (shortlist rate, interview pass rate, offer rate, accept
-// rate) from applications that have already resolved one way or another,
-// then apply those same rates to applications currently still in progress.
-// This is the same technique sales/recruiting pipelines use ("expected
-// bookings = pipeline value x historical win rate") — a real analytical
-// method, not a black box. Requires a minimum sample size before showing
-// a confident number; below that, says so honestly instead of guessing.
+// "Forecasts" here means a pipeline-conversion projection, not a time-series
+// prediction — this college's data doesn't support the latter honestly (every
+// seeded offer shares a creation date, so there's no day-by-day trend to
+// extrapolate, and inventing one would be exactly the fake number this app
+// avoids elsewhere). Instead: measure this season's REAL conversion on work
+// that has already finished, then apply it to work still running.
+//
+// WHY THERE ARE TWO BASES
+// -----------------------
+// The projection answers "how many more STUDENTS get placed", so the rate it
+// multiplies has to be about students too. The first version multiplied a
+// per-APPLICATION select rate by a count of students, which mixes units: a
+// student with three live applications has a better chance than any one of
+// those applications does.
+//
+//   basis "student"      preferred. Of students whose pipeline has fully
+//                        resolved (at least one finished application, none
+//                        still running), what share ended up placed? That is
+//                        already a per-student number, so it multiplies a
+//                        student count directly — no conversion, no
+//                        independence assumption.
+//
+//   basis "application"  fallback, used when too few students have finished
+//                        their season to measure the above. Converts the
+//                        per-application rate p into a per-student
+//                        expectation properly: a student with n live
+//                        applications contributes 1 - (1-p)^n, summed across
+//                        students. That treats applications as independent,
+//                        which they aren't — a strong candidate wins
+//                        everywhere and a weak one nowhere — so this basis is
+//                        reported as such and the page labels it.
+//
+// The interview pass rate is DESCRIPTIVE ONLY. It's reported because it's
+// useful to see, but deliberately not multiplied into the projection: the
+// select rate already reflects the whole funnel, interviews included, so
+// compounding the two would double-count the same filtering step.
+
 const MIN_SAMPLE = 10;
+// Above this the projection is reported plainly; between MIN and STRONG it is
+// flagged indicative, because a rate measured on a dozen outcomes moves a lot
+// with one more result.
+const STRONG_SAMPLE = 30;
+
 const IN_PROGRESS_STATUSES = ["APPLIED", "COLLEGE_APPROVED", "SCREENING", "SHORTLISTED", "ROUND_IN_PROGRESS"];
 const RESOLVED_STATUSES = ["SELECTED", "REJECTED", "WITHDRAWN"];
+const PLACING_OFFER_STATUSES = ["ACCEPTED", "JOINING_PENDING", "JOINED"];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getPipelineForecast(db: any, batchId: string | null = null) {
+export type ForecastBasis = "student" | "application";
+
+/** Per-student placement expectation derived from a per-application rate. */
+function expectedFromApplicationRate(pendingPerStudent: number[], p: number): number {
+  return pendingPerStudent.reduce((sum, n) => sum + (1 - Math.pow(1 - p, n)), 0);
+}
+
+export async function getPipelineForecast(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  batchId: string | null = null,
+  // The eligible population, as defined by the college's eligibility policy
+  // (lib/students/eligibility-policy.ts). Passed in rather than hardcoded to
+  // `eligibleForPlacements: true`, so this denominator means the same thing
+  // as the "Eligible" count on the Students page.
+  eligibleWhere: Record<string, unknown> = { eligibleForPlacements: true },
+) {
   const studentBatchWhere = batchId ? { student: { batchId } } : {};
 
-  const placedStudentIds = (
-    await db.offer.findMany({ where: { status: { in: ["ACCEPTED", "JOINING_PENDING", "JOINED"] }, ...studentBatchWhere }, select: { studentId: true }, distinct: ["studentId"] })
+  const placedStudentIds: string[] = (
+    await db.offer.findMany({
+      where: { status: { in: PLACING_OFFER_STATUSES }, ...studentBatchWhere },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    })
   ).map((o: { studentId: string }) => o.studentId);
+  const placedSet = new Set<string>(placedStudentIds);
 
-  const [resolvedApplications, inProgressStudents, studentCount, roundOutcomes, selectedCount, passedCount] = await Promise.all([
+  const [
+    resolvedApplications,
+    selectedCount,
+    roundOutcomes,
+    passedCount,
+    eligibleStudentCount,
+    resolvedStudents,
+    anyInProgressStudents,
+    inProgressRows,
+  ] = await Promise.all([
     db.application.count({ where: { status: { in: RESOLVED_STATUSES }, ...studentBatchWhere } }),
-    // Distinct STUDENTS with an in-progress application, excluding anyone
-    // already placed — a student with 3 pending applications can only ever
-    // add 1 to the placed count, never 3. Counting raw applications here
-    // (instead of students) was the bug behind a >100% projected rate.
+    db.application.count({ where: { status: "SELECTED", ...studentBatchWhere } }),
+    db.roundCandidate.count({ where: { status: { in: ["PASSED", "FAILED"] }, ...studentBatchWhere } }),
+    db.roundCandidate.count({ where: { status: "PASSED", ...studentBatchWhere } }),
+    db.student.count({ where: { AND: [eligibleWhere, ...(batchId ? [{ batchId }] : [])] } }),
     db.application.findMany({
-      where: { status: { in: IN_PROGRESS_STATUSES }, studentId: { notIn: placedStudentIds }, ...studentBatchWhere },
+      where: { status: { in: RESOLVED_STATUSES }, ...studentBatchWhere },
       select: { studentId: true },
       distinct: ["studentId"],
     }),
-    db.student.count({ where: { eligibleForPlacements: true, ...(batchId ? { batchId } : {}) } }),
-    db.roundCandidate.count({ where: { status: { in: ["PASSED", "FAILED"] }, ...studentBatchWhere } }),
-    db.application.count({ where: { status: "SELECTED", ...studentBatchWhere } }),
-    db.roundCandidate.count({ where: { status: "PASSED", ...studentBatchWhere } }),
+    // Every student with live work, placed or not — used to decide whose
+    // season is over, which is a different question from who still counts
+    // towards the projection.
+    db.application.findMany({
+      where: { status: { in: IN_PROGRESS_STATUSES }, ...studentBatchWhere },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    }),
+    // Deliberately not distinct: the per-student application counts are what
+    // the application-basis conversion needs.
+    db.application.findMany({
+      where: { status: { in: IN_PROGRESS_STATUSES }, studentId: { notIn: placedStudentIds }, ...studentBatchWhere },
+      select: { studentId: true },
+    }),
   ]);
 
-  const inProgressCount = inProgressStudents.length;
-  const totalResolved = resolvedApplications;
-  const selectRate = totalResolved > 0 ? selectedCount / totalResolved : 0;
+  const stillRunning = new Set<string>(anyInProgressStudents.map((a: { studentId: string }) => a.studentId));
+  const settledStudentIds: string[] = resolvedStudents
+    .map((a: { studentId: string }) => a.studentId)
+    .filter((id: string) => !stillRunning.has(id));
+  const settledPlacedCount = settledStudentIds.filter((id) => placedSet.has(id)).length;
+
+  const pendingByStudent = new Map<string, number>();
+  for (const row of inProgressRows as { studentId: string }[]) {
+    pendingByStudent.set(row.studentId, (pendingByStudent.get(row.studentId) ?? 0) + 1);
+  }
+  const inProgressStudents = pendingByStudent.size;
+  const inProgressApplications: number = inProgressRows.length;
+
+  const applicationSelectRate = resolvedApplications > 0 ? selectedCount / resolvedApplications : 0;
+  const studentPlacementRate = settledStudentIds.length > 0 ? settledPlacedCount / settledStudentIds.length : 0;
   const interviewPassRate = roundOutcomes > 0 ? passedCount / roundOutcomes : 0;
 
-  const confident = totalResolved >= MIN_SAMPLE && roundOutcomes >= MIN_SAMPLE;
+  // Student basis wins whenever it has the sample to stand on.
+  const useStudentBasis = settledStudentIds.length >= MIN_SAMPLE;
+  const basis: ForecastBasis = useStudentBasis ? "student" : "application";
+  const sampleSize = useStudentBasis ? settledStudentIds.length : resolvedApplications;
+  const conversionRate = useStudentBasis ? studentPlacementRate : applicationSelectRate;
+  const confident = sampleSize >= MIN_SAMPLE;
+  const indicative = confident && sampleSize < STRONG_SAMPLE;
 
-  // An in-progress student's chance of eventually landing a placement,
-  // approximated as this season's observed select-rate among applications
-  // that already resolved. Simple and transparent on purpose. Capped at
-  // the number of still-unplaced eligible students as a hard sanity bound
-  // — a college can never place more students than it has.
-  const unplacedEligible = Math.max(0, studentCount - placedStudentIds.length);
-  const expectedAdditionalPlacements = confident ? Math.min(Math.round(inProgressCount * selectRate), unplacedEligible) : null;
-  const projectedPlacedCount = expectedAdditionalPlacements !== null ? placedStudentIds.length + expectedAdditionalPlacements : null;
-  const projectedPlacementPct = projectedPlacedCount !== null && studentCount > 0 ? Math.round((projectedPlacedCount / studentCount) * 1000) / 10 : null;
+  // A college can never place more students than it has left unplaced.
+  const unplacedEligible = Math.max(0, eligibleStudentCount - placedStudentIds.length);
+  const rawExpected = useStudentBasis
+    ? inProgressStudents * studentPlacementRate
+    : expectedFromApplicationRate([...pendingByStudent.values()], applicationSelectRate);
+
+  const expectedAdditionalPlacements = confident ? Math.min(Math.round(rawExpected), unplacedEligible) : null;
+  const projectedPlacedCount =
+    expectedAdditionalPlacements !== null ? placedStudentIds.length + expectedAdditionalPlacements : null;
+  const projectedPlacementPct =
+    projectedPlacedCount !== null && eligibleStudentCount > 0
+      ? Math.round((projectedPlacedCount / eligibleStudentCount) * 1000) / 10
+      : null;
 
   return {
     confident,
-    sampleSize: totalResolved,
-    interviewSampleSize: roundOutcomes,
-    selectRatePct: Math.round(selectRate * 1000) / 10,
+    indicative,
+    basis,
+    /** The rate actually used for the projection, unrounded. */
+    conversionRate,
+    conversionRatePct: Math.round(conversionRate * 1000) / 10,
+    sampleSize,
+    sampleUnit: useStudentBasis ? ("students" as const) : ("applications" as const),
+    /** Context only — never multiplied into the projection. */
     interviewPassRatePct: Math.round(interviewPassRate * 1000) / 10,
-    inProgressCount,
+    interviewSampleSize: roundOutcomes,
+    settledStudentCount: settledStudentIds.length,
+    resolvedApplicationCount: resolvedApplications,
+    /** Distinct unplaced students with live applications. */
+    inProgressStudents,
+    /** Raw application rows still running — always >= inProgressStudents. */
+    inProgressApplications,
     currentPlacedCount: placedStudentIds.length,
-    currentPlacementPct: studentCount > 0 ? Math.round((placedStudentIds.length / studentCount) * 1000) / 10 : 0,
+    currentPlacementPct:
+      eligibleStudentCount > 0 ? Math.round((placedStudentIds.length / eligibleStudentCount) * 1000) / 10 : 0,
     expectedAdditionalPlacements,
     projectedPlacedCount,
     projectedPlacementPct,
-    eligibleStudentCount: studentCount,
+    eligibleStudentCount,
   };
 }
 
-// Department-level breakdown of the same projection — applies the one
-// college-wide select rate (per-department sample sizes are too small in
-// most colleges to support their own independent rate honestly) to each
-// department's own in-progress application count.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getDepartmentForecast(db: any, selectRate: number, confident: boolean, batchId: string | null = null) {
+// Department breakdown of the same projection. Takes the UNROUNDED rate and
+// the basis from getPipelineForecast — the first version was handed
+// selectRatePct / 100, so departments were computed from 0.905 while the
+// college-wide figure used 0.90476, and the parts could disagree with the
+// whole by a student.
+//
+// One college-wide rate is applied to every department on purpose:
+// per-department samples are far too small in most colleges to support their
+// own independent rate honestly.
+export async function getDepartmentForecast(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  opts: { rate: number; basis: ForecastBasis; confident: boolean; batchId?: string | null },
+) {
+  const { rate, basis, confident, batchId = null } = opts;
   if (!confident) return [];
 
   const studentBatchWhere = batchId ? { student: { batchId } } : {};
 
   const placedStudentIds = (
-    await db.offer.findMany({ where: { status: { in: ["ACCEPTED", "JOINING_PENDING", "JOINED"] }, ...studentBatchWhere }, select: { studentId: true }, distinct: ["studentId"] })
+    await db.offer.findMany({
+      where: { status: { in: PLACING_OFFER_STATUSES }, ...studentBatchWhere },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    })
   ).map((o: { studentId: string }) => o.studentId);
 
-  const inProgress = await db.application.findMany({
+  const rows = await db.application.findMany({
     where: { status: { in: IN_PROGRESS_STATUSES }, studentId: { notIn: placedStudentIds }, ...studentBatchWhere },
     select: { studentId: true, student: { select: { department: { select: { name: true } } } } },
-    distinct: ["studentId"],
   });
 
-  const byDept = new Map<string, number>();
-  for (const a of inProgress as { student: { department: { name: string } | null } }[]) {
-    const key = a.student.department?.name ?? "Unassigned";
-    byDept.set(key, (byDept.get(key) ?? 0) + 1);
+  // department -> studentId -> live application count
+  const byDept = new Map<string, Map<string, number>>();
+  for (const r of rows as { studentId: string; student: { department: { name: string } | null } }[]) {
+    const key = r.student.department?.name ?? "Unassigned";
+    const students = byDept.get(key) ?? new Map<string, number>();
+    students.set(r.studentId, (students.get(r.studentId) ?? 0) + 1);
+    byDept.set(key, students);
   }
 
   return [...byDept.entries()]
-    .map(([name, inProgressCount]) => ({ name, inProgressCount, expectedAdditional: Math.round(inProgressCount * selectRate) }))
+    .map(([name, students]) => {
+      const expected =
+        basis === "student" ? students.size * rate : expectedFromApplicationRate([...students.values()], rate);
+      return { name, inProgressCount: students.size, expectedAdditional: Math.round(expected) };
+    })
     .sort((a, b) => b.inProgressCount - a.inProgressCount);
 }
