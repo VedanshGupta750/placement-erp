@@ -3,27 +3,40 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase, UserX, UserCheck } from "lucide-react";
+import { Tag, RefreshCw, MessageSquare, Download, X, GitCompare, UserCog, FolderDown, Briefcase, UserX, UserCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { ConfirmDeleteDialog } from "@/components/ui/confirm-delete-dialog";
 
 type Coordinator = { id: string; name: string; title: string; departmentName: string };
 type Drive = { id: string; title: string; companyName: string; positions: { id: string; title: string }[] };
+
+type Impact = {
+  studentCount: number;
+  applications: number;
+  offers: number;
+  resumes: number;
+  documents: number;
+  notes: number;
+  interviewRecords: number;
+};
 
 export function BulkActionsBar({
   studentIds,
   onDone,
   canEdit,
+  canDelete,
   selectableCount,
   onSelectAll,
 }: {
   studentIds: string[];
   onDone: () => void;
   canEdit: boolean;
+  canDelete: boolean;
   /** Rows currently loaded, for the "select all N" shortcut. */
   selectableCount: number;
   onSelectAll: () => void;
@@ -46,6 +59,8 @@ export function BulkActionsBar({
   const [pending, setPending] = useState(false);
   const [suspendOpen, setSuspendOpen] = useState(false);
   const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [impact, setImpact] = useState<Impact | null>(null);
 
   useEffect(() => {
     if (!coordOpen || coordinators.length > 0) return;
@@ -82,6 +97,43 @@ export function BulkActionsBar({
     toast.error(data.message ?? "Bulk action failed.");
     return false;
   }
+
+  // Counts are fetched before the dialog opens rather than inside it, so
+  // the confirmation never renders a warning with placeholder numbers in
+  // it — the person reads the real blast radius or nothing.
+  async function openDelete() {
+    setImpact(null);
+    const res = await fetch("/api/students/bulk/deletion-impact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentIds }),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't check what deleting these students would affect.");
+      return;
+    }
+    const data = await res.json();
+    setImpact(data.impact);
+    setDeleteOpen(true);
+  }
+
+  const deleteConsequences = (() => {
+    if (!impact) return undefined;
+    const parts = [
+      impact.applications > 0 ? `${impact.applications} application${impact.applications === 1 ? "" : "s"}` : null,
+      impact.offers > 0 ? `${impact.offers} offer${impact.offers === 1 ? "" : "s"}` : null,
+      impact.interviewRecords > 0
+        ? `${impact.interviewRecords} interview record${impact.interviewRecords === 1 ? "" : "s"}`
+        : null,
+      impact.resumes > 0 ? `${impact.resumes} resume${impact.resumes === 1 ? "" : "s"}` : null,
+      impact.documents > 0 ? `${impact.documents} document${impact.documents === 1 ? "" : "s"}` : null,
+      impact.notes > 0 ? `${impact.notes} note${impact.notes === 1 ? "" : "s"}` : null,
+    ].filter(Boolean);
+    const tail = "Their login accounts are removed too, so they lose access immediately. This can't be undone.";
+    return parts.length === 0
+      ? `No applications, offers or documents are attached. ${tail}`
+      : `This also permanently deletes ${parts.join(", ")}. ${tail}`;
+  })();
 
   return (
     <div className="bg-accent/60 flex flex-col gap-2 rounded-lg border px-3 py-2 sm:flex-row sm:items-center">
@@ -294,6 +346,24 @@ export function BulkActionsBar({
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </>
+        )}
+
+        {canDelete && (
+          <>
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={openDelete}>
+              <Trash2 className="size-3.5" /> Delete
+            </Button>
+            <ConfirmDeleteDialog
+              open={deleteOpen}
+              onOpenChange={setDeleteOpen}
+              itemKind={studentIds.length === 1 ? "student" : "students"}
+              itemName={`${studentIds.length} student${studentIds.length === 1 ? "" : "s"}`}
+              consequences={deleteConsequences}
+              onConfirm={async () => {
+                if (await run("delete", {})) setDeleteOpen(false);
+              }}
+            />
           </>
         )}
 

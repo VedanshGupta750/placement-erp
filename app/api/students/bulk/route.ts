@@ -8,6 +8,8 @@ import { getStudentScopeWhere } from "@/lib/students/scope";
 import { computeMatchScore } from "@/lib/matching";
 import { recomputeDriveCounters } from "@/lib/drives/counters";
 import { requireNotSelfServiceStudent, StaffOnlyError } from "@/lib/students/guard";
+import { collectStudentDeletionImpact, deleteStudentsCompletely } from "@/lib/students/delete";
+import { Prisma } from "@/lib/generated/prisma/client";
 
 type BulkAction =
   | "add_tag"
@@ -16,7 +18,8 @@ type BulkAction =
   | "assign_coordinator"
   | "add_to_drive"
   | "suspend_accounts"
-  | "reactivate_accounts";
+  | "reactivate_accounts"
+  | "delete";
 
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -51,7 +54,7 @@ export async function POST(request: Request) {
   const scopeWhere = await getStudentScopeWhere(db, session);
   const students = await db.student.findMany({
     where: { id: { in: studentIds }, ...scopeWhere },
-    select: { id: true, tags: true, userId: true, user: { select: { name: true, email: true } } },
+    select: { id: true, tags: true, userId: true, enrollmentNumber: true, user: { select: { name: true, email: true } } },
   });
   if (students.length === 0) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
@@ -208,6 +211,59 @@ export async function POST(request: Request) {
         "/dashboard",
       );
     }
+  } else if (action === "delete") {
+    // student.delete on top of student.bulk_update, same layering as
+    // add_to_drive — this is the only irreversible action in the module.
+    try {
+      await requirePermission(session, "student.delete");
+    } catch (e) {
+      if (e instanceof ForbiddenError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      throw e;
+    }
+
+    // Logged per student BEFORE the delete: afterwards there is no row left
+    // to point at, so this is the only remaining record of who was removed.
+    const impact = await collectStudentDeletionImpact(db, students.map((s) => s.id));
+    for (const s of students) {
+      await recordAudit(db, {
+        collegeId: session.collegeId,
+        actorId: session.userId,
+        action: "student.deleted",
+        resourceType: "Student",
+        resourceId: s.id,
+        after: {
+          name: s.user.name,
+          email: s.user.email,
+          enrollmentNumber: s.enrollmentNumber,
+          viaBulkAction: true,
+        },
+      });
+    }
+
+    try {
+      successCount = await deleteStudentsCompletely(
+        db,
+        students.map((s) => ({ id: s.id, userId: s.userId })),
+        session.userId,
+      );
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
+        return NextResponse.json(
+          {
+            error: "delete_blocked",
+            message:
+              "One or more of these students still has records elsewhere that must be removed first. Nothing was deleted — suspend the accounts instead.",
+          },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+
+    // Returned early: the shared bulk audit line below would reference
+    // students that no longer exist, and the per-student entries above
+    // already cover it.
+    return NextResponse.json({ ok: true, successCount, impact });
   } else {
     return NextResponse.json({ error: "validation_error", message: "Unknown action." }, { status: 400 });
   }

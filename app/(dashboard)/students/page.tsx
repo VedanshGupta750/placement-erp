@@ -76,9 +76,10 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   }
 
   const canCreate = await hasPermission(session, "student.create");
-  // Bulk account actions need both: the permission to edit a student and
-  // the permission to act on many at once.
+  // Bulk suspend needs student.edit; bulk delete needs student.delete,
+  // which by default only TPO and College Admin hold.
   const canBulkEdit = (await hasPermission(session, "student.edit")) && (await hasPermission(session, "student.bulk_update"));
+  const canDelete = await hasPermission(session, "student.delete");
   const db = getTenantDb(session.collegeId);
 
   // Kept separate from `where` (rather than spread into it) so a
@@ -347,7 +348,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
                 </div>
               </div>
               <p className="text-muted-foreground mb-3 text-xs">{rows.length} of {filteredTotal} students shown</p>
-              <StudentsTable rows={rows} canEdit={canBulkEdit} />
+              <StudentsTable rows={rows} canEdit={canBulkEdit} canDelete={canDelete} />
             </CardContent>
           </Card>
         </div>

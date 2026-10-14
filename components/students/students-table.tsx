@@ -27,9 +27,11 @@ export type StudentRow = {
 export function StudentsTable({
   rows,
   canEdit = false,
+  canDelete = false,
 }: {
   rows: StudentRow[];
   canEdit?: boolean;
+  canDelete?: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const allSelected = rows.length > 0 && selected.size === rows.length;
@@ -56,6 +58,7 @@ export function StudentsTable({
           studentIds={[...selected]}
           onDone={() => setSelected(new Set())}
           canEdit={canEdit}
+          canDelete={canDelete}
           selectableCount={rows.length}
           onSelectAll={selectAll}
         />

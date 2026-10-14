@@ -4,6 +4,9 @@ import { getTenantDb } from "@/lib/tenant/scoped-db";
 import { requirePermission, ForbiddenError } from "@/lib/rbac/guard";
 import { recordAudit } from "@/lib/audit";
 import { requireNotSelfServiceStudent, StaffOnlyError } from "@/lib/students/guard";
+import { getStudentScopeWhere } from "@/lib/students/scope";
+import { collectStudentDeletionImpact, deleteStudentsCompletely } from "@/lib/students/delete";
+import { Prisma } from "@/lib/generated/prisma/client";
 
 const SENSITIVE_FIELDS = new Set(["aggregate", "tenthScore", "twelfthScore", "diplomaScore"]);
 const EDITABLE_FIELDS = new Set([
@@ -104,4 +107,72 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   });
 
   return NextResponse.json({ ok: true, student: updated });
+}
+
+// Hard-deletes the student and their login account. See lib/students/delete.ts
+// for what cascades, what is reassigned, and why the User row is the one
+// that has to go.
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  const { id: studentId } = await params;
+  const db = getTenantDb(session.collegeId);
+
+  try {
+    // student.delete, not student.edit — a role that maintains the roster
+    // shouldn't be able to erase a record just because it can correct one.
+    await requirePermission(session, "student.delete");
+    await requireNotSelfServiceStudent(db, session);
+  } catch (e) {
+    if (e instanceof ForbiddenError || e instanceof StaffOnlyError) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    throw e;
+  }
+
+  // Row-level scope applies here as it does to every other student
+  // mutation: a Department Coordinator granted student.delete could
+  // otherwise delete outside their own department by calling this directly.
+  const scopeWhere = await getStudentScopeWhere(db, session);
+  const student = await db.student.findFirst({
+    where: { id: studentId, ...scopeWhere },
+    select: { id: true, userId: true, enrollmentNumber: true, user: { select: { name: true, email: true } } },
+  });
+  if (!student) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  // Recorded BEFORE the delete — the counts are unreachable afterwards, and
+  // the audit entry is the only remaining trace of what was destroyed.
+  const impact = await collectStudentDeletionImpact(db, [studentId]);
+
+  await recordAudit(db, {
+    collegeId: session.collegeId,
+    actorId: session.userId,
+    action: "student.deleted",
+    resourceType: "Student",
+    resourceId: studentId,
+    after: {
+      name: student.user.name,
+      email: student.user.email,
+      enrollmentNumber: student.enrollmentNumber,
+      ...impact,
+    },
+  });
+
+  try {
+    await deleteStudentsCompletely(db, [{ id: student.id, userId: student.userId }], session.userId);
+  } catch (e) {
+    // P2003 = foreign key constraint. Means this student holds a row in a
+    // required relation the helper doesn't know about yet; report it rather
+    // than 500, and the audit entry above records the attempt.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
+      return NextResponse.json(
+        {
+          error: "delete_blocked",
+          message:
+            "This student still has records elsewhere that must be removed first. Suspend the account instead, and report this so the delete can be extended.",
+        },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
+
+  return NextResponse.json({ ok: true, name: student.user.name });
 }

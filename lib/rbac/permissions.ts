@@ -20,6 +20,12 @@ export const PERMISSIONS = [
   perm("student.export", "Export student data"),
   perm("student.bulk_update", "Bulk-update student records"),
   perm("student.view_sensitive", "View sensitive student fields"),
+  // Hard-deletes the student AND their login account, taking applications,
+  // offers, interview records, resumes, documents and notes with it.
+  // Deliberately separate from student.edit so the roles that maintain the
+  // roster day to day (Placement/Department Coordinator) can correct a
+  // record without being able to erase one.
+  perm("student.delete", "Delete student records"),
 
   perm("eligibility.view", "View eligibility rules & results"),
   perm("eligibility.create_rule", "Create eligibility rules"),
@@ -181,6 +187,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<SystemRole, "TPO">, Permis
     "student.export",
     "student.bulk_update",
     "student.view_sensitive",
+    "student.delete",
     "company.view",
     "company.create",
     "company.edit",

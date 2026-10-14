@@ -9,31 +9,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { Pencil, MessageSquare, Briefcase, MoreHorizontal, Link2, UserX, UserCheck, KeyRound, Copy } from "lucide-react";
+import { Pencil, MessageSquare, Briefcase, MoreHorizontal, Link2, UserX, UserCheck, KeyRound, Copy, Trash2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ConfirmDeleteDialog } from "@/components/ui/confirm-delete-dialog";
 
 type Drive = { id: string; title: string; companyName: string; positions: { id: string; title: string }[] };
 
 export function StudentHeaderActions({
   studentId,
+  studentName,
   recipientUserId,
   canEdit,
   canAddToDrive,
   canMessage,
+  canDelete,
   initial,
   drives,
   accountStatus,
 }: {
   studentId: string;
+  studentName: string;
   recipientUserId: string;
   canEdit: boolean;
   canAddToDrive: boolean;
   canMessage: boolean;
+  canDelete: boolean;
   initial: { placementStatus: string; eligibleForPlacements: boolean; interestedInJobs: boolean; interestedInInternships: boolean };
   drives: Drive[];
   accountStatus: string;
@@ -44,6 +49,8 @@ export function StudentHeaderActions({
   const [driveOpen, setDriveOpen] = useState(false);
   const [resetPwOpen, setResetPwOpen] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConsequences, setDeleteConsequences] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const isSuspended = accountStatus === "SUSPENDED";
 
@@ -144,6 +151,52 @@ export function StudentHeaderActions({
     } else {
       toast.error("Couldn't update the account.");
     }
+  }
+
+  // The counts are fetched before the dialog opens so the warning always
+  // states the real blast radius rather than a generic "this can't be
+  // undone" — see /api/students/[id]/deletion-impact.
+  async function openDelete() {
+    setDeleteConsequences(undefined);
+    const res = await fetch(`/api/students/${studentId}/deletion-impact`);
+    if (!res.ok) {
+      toast.error("Couldn't check what deleting this student would affect.");
+      return;
+    }
+    const { impact } = await res.json();
+    const parts = [
+      impact.applications > 0 ? `${impact.applications} application${impact.applications === 1 ? "" : "s"}` : null,
+      impact.offers > 0 ? `${impact.offers} offer${impact.offers === 1 ? "" : "s"}` : null,
+      impact.interviewRecords > 0
+        ? `${impact.interviewRecords} interview record${impact.interviewRecords === 1 ? "" : "s"}`
+        : null,
+      impact.resumes > 0 ? `${impact.resumes} resume${impact.resumes === 1 ? "" : "s"}` : null,
+      impact.documents > 0 ? `${impact.documents} document${impact.documents === 1 ? "" : "s"}` : null,
+      impact.notes > 0 ? `${impact.notes} note${impact.notes === 1 ? "" : "s"}` : null,
+    ].filter(Boolean);
+    const tail = "Their login account is removed too, so they lose access immediately. This can't be undone.";
+    setDeleteConsequences(
+      parts.length === 0
+        ? `No applications, offers or documents are attached. ${tail}`
+        : `This also permanently deletes ${parts.join(", ")}. ${tail}`,
+    );
+    setDeleteOpen(true);
+  }
+
+  async function deleteStudent() {
+    const res = await fetch(`/api/students/${studentId}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      // delete_blocked is a refusal with a reason, not a generic failure.
+      toast.error(data.message ?? "Couldn't delete this student.");
+      return;
+    }
+    setDeleteOpen(false);
+    // This lives on the student's own page, so refreshing in place would
+    // re-render a record that no longer exists. Go back to the roster.
+    toast.success(`${studentName} deleted.`);
+    router.push("/students");
+    router.refresh();
   }
 
   async function addToDrive() {
@@ -294,8 +347,24 @@ export function StudentHeaderActions({
               {isSuspended ? "Reactivate account" : "Suspend account"}
             </DropdownMenuItem>
           )}
+          {canDelete && (
+            <DropdownMenuItem onClick={openDelete} disabled={pending} variant="destructive">
+              <Trash2 className="size-3.5" /> Delete student
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {canDelete && (
+        <ConfirmDeleteDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          itemKind="student"
+          itemName={studentName}
+          consequences={deleteConsequences}
+          onConfirm={deleteStudent}
+        />
+      )}
 
       {canEdit && (
         <Dialog open={resetPwOpen} onOpenChange={setResetPwOpen}>

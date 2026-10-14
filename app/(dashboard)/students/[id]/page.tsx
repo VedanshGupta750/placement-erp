@@ -70,10 +70,11 @@ export default async function StudentDetailPage({
   });
   if (!student) notFound();
 
-  const [canEdit, canMessage, canAddToDrive, activeDrives, pendingAcademicRequests] = await Promise.all([
+  const [canEdit, canMessage, canAddToDrive, canDelete, activeDrives, pendingAcademicRequests] = await Promise.all([
     hasPermission(session, "student.edit"),
     hasPermission(session, "message.send"),
     hasPermission(session, "application.approve"),
+    hasPermission(session, "student.delete"),
     db.drive.findMany({
       where: { status: { in: ["PUBLISHED", "REGISTRATION_OPEN"] } },
       include: { company: { select: { name: true } }, positions: { select: { id: true, title: true } } },
@@ -136,6 +137,8 @@ export default async function StudentDetailPage({
           canEdit={canEdit}
           canMessage={canMessage}
           canAddToDrive={canAddToDrive}
+          canDelete={canDelete}
+          studentName={student.user.name}
           accountStatus={student.user.status}
           initial={{
             placementStatus: student.placementStatus,
